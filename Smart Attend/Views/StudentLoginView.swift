@@ -14,8 +14,9 @@ struct LoginView: View {
     @State private var className = ""
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @State private var isLoggingIn = false
     
-    let onLoginSuccess: (Student) -> Void
+    let onLoginSuccess: (String, String, String) -> Bool
     
     var body: some View {
         ZStack {
@@ -66,6 +67,7 @@ struct LoginView: View {
                             TextField("Enter your full name", text: $name)
                                 .textFieldStyle(CustomTextFieldStyle())
                                 .autocapitalization(.words)
+                                .disabled(isLoggingIn)
                         }
                         
                         // Roll Number Field
@@ -77,6 +79,7 @@ struct LoginView: View {
                             TextField("e.g., 2021001", text: $rollNumber)
                                 .textFieldStyle(CustomTextFieldStyle())
                                 .keyboardType(.numberPad)
+                                .disabled(isLoggingIn)
                         }
                         
                         // Class Field
@@ -88,13 +91,20 @@ struct LoginView: View {
                             TextField("e.g., 2S12", text: $className)
                                 .textFieldStyle(CustomTextFieldStyle())
                                 .autocapitalization(.allCharacters)
+                                .disabled(isLoggingIn)
                         }
                         
                         // Login Button
                         Button(action: handleLogin) {
                             HStack {
-                                Image(systemName: "arrow.right.circle.fill")
-                                Text("Sign In")
+                                if isLoggingIn {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "arrow.right.circle.fill")
+                                    Text("Sign In")
+                                }
                             }
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white)
@@ -110,8 +120,8 @@ struct LoginView: View {
                             .cornerRadius(12)
                             .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
                         }
-                        .disabled(!isFormValid)
-                        .opacity(isFormValid ? 1.0 : 0.6)
+                        .disabled(!isFormValid || isLoggingIn)
+                        .opacity(isFormValid && !isLoggingIn ? 1.0 : 0.6)
                     }
                     .padding(.horizontal, 24)
                     .padding(.vertical, 32)
@@ -122,13 +132,13 @@ struct LoginView: View {
                     )
                     .padding(.horizontal, 20)
                     
-                    // Testing Note
+                    // Security Note
                     VStack(spacing: 8) {
-                        Text("Testing Mode")
+                        Text("Secure Login")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(.white)
                         
-                        Text("Use any valid details for testing. Your session will be saved locally.")
+                        Text("Your credentials are stored securely and will persist across app sessions.")
                             .font(.system(size: 14))
                             .foregroundColor(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
@@ -179,14 +189,18 @@ struct LoginView: View {
             return
         }
         
-        let student = Student(
-            name: trimmedName,
-            rollNumber: trimmedRoll,
-            className: trimmedClass
-        )
+        isLoggingIn = true
         
-        // Success - call completion handler
-        onLoginSuccess(student)
+        // Attempt login with authentication manager
+        let success = onLoginSuccess(trimmedName, trimmedRoll, trimmedClass)
+        
+        DispatchQueue.main.async {
+            self.isLoggingIn = false
+            
+            if !success {
+                self.showError("Failed to save login credentials. Please try again.")
+            }
+        }
     }
     
     private func showError(_ message: String) {
@@ -213,7 +227,8 @@ struct CustomTextFieldStyle: TextFieldStyle {
 }
 
 #Preview {
-    LoginView { student in
-        print("Logged in: \(student.name) - \(student.rollNumber) - \(student.className)")
+    LoginView { name, rollNumber, className in
+        print("Logged in: \(name) - \(rollNumber) - \(className)")
+        return true
     }
 }

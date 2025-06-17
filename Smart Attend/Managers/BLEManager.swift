@@ -1,6 +1,7 @@
 import Foundation
 import CoreBluetooth
 import Combine
+import UIKit
 
 class StudentBLEManager: NSObject, ObservableObject {
     
@@ -9,15 +10,19 @@ class StudentBLEManager: NSObject, ObservableObject {
     @Published var isScanning: Bool = false
     @Published var targetRoomDetected: Bool = false
     @Published var detectedDevice: BLEDevice?
+    @Published var showingBluetoothPrompt: Bool = false
+    @Published var bluetoothPromptType: BluetoothPromptType = .poweredOff
     
     // MARK: - Private Properties
     private var centralManager: CBCentralManager!
     private var targetRoom: String = ""
     private var scanTimer: Timer?
     private let scanTimeout: TimeInterval = 30.0
+    private var hasRequestedPermission: Bool = false
     
     // Callbacks
     var onRoomDetected: ((BLEDevice) -> Void)?
+    var onBluetoothIssue: ((BluetoothPromptType) -> Void)?
     
     // MARK: - Initialization
     override init() {
@@ -27,21 +32,127 @@ class StudentBLEManager: NSObject, ObservableObject {
     
     // MARK: - Setup Methods
     private func setupCentralManager() {
-        centralManager = CBCentralManager(delegate: self, queue: DispatchQueue.main)
+        // Initialize WITHOUT automatic permission request and native alerts
+        centralManager = CBCentralManager(delegate: self, queue: DispatchQueue.main, options: [
+            CBCentralManagerOptionShowPowerAlertKey: false // Suppress native power alerts
+        ])
     }
     
     // MARK: - Public Methods
     
-    /// Start scanning for specific room
+    /// Start scanning for specific room with correct permission handling
     func startScanningForRoom(_ room: String) {
-        guard centralManager.state == .poweredOn else {
-            print("❌ Cannot start scanning - Bluetooth not powered on")
+        // Clean room name
+        targetRoom = room.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        
+        print("🔍 Attempting to start BLE scan for room: \(targetRoom)")
+        
+        // Check current Bluetooth state
+        switch centralManager.state {
+        case .poweredOn:
+            performScan()
+            
+        case .poweredOff:
+            print("❌ Bluetooth is powered off (permission granted)")
+            showBluetoothPrompt(type: .poweredOff)
+            
+        case .unauthorized:
+            print("❌ Bluetooth permission denied")
+            showBluetoothPrompt(type: .unauthorized)
+            
+        case .unsupported:
+            print("❌ Bluetooth not supported")
+            showBluetoothPrompt(type: .unsupported)
+            
+        case .unknown, .resetting:
+            print("⚠️ Bluetooth state unknown/resetting - waiting for state...")
+            status = .unknown
+            // Will handle when state becomes known
+            
+        @unknown default:
+            print("⚠️ Unknown Bluetooth state")
+            status = .unknown
+        }
+    }
+    
+    /// Retry scanning after user handles Bluetooth issue
+    func retryScanning() {
+        guard !targetRoom.isEmpty else {
+            print("❌ No target room set for retry")
             return
         }
         
-        // Clean room name (remove any spaces/special chars and convert to uppercase)
-        targetRoom = room.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        dismissBluetoothPrompt()
         
+        // Small delay to allow UI to settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.startScanningForRoom(self.targetRoom)
+        }
+    }
+    
+    /// Stop scanning
+    func stopScanning() {
+        centralManager.stopScan()
+        isScanning = false
+        scanTimer?.invalidate()
+        scanTimer = nil
+        
+        if targetRoomDetected {
+            status = .deviceFound
+        } else {
+            status = centralManager.state == .poweredOn ? .poweredOn : .poweredOff
+        }
+        
+        print("⏹️ Stopped BLE scanning")
+    }
+    
+    /// Reset detection state
+    func resetDetection() {
+        targetRoomDetected = false
+        detectedDevice = nil
+        targetRoom = ""
+        dismissBluetoothPrompt()
+    }
+    
+    /// Show Bluetooth prompt
+    func showBluetoothPrompt(type: BluetoothPromptType) {
+        DispatchQueue.main.async {
+            self.bluetoothPromptType = type
+            self.showingBluetoothPrompt = true
+            self.onBluetoothIssue?(type)
+        }
+    }
+    
+    /// Dismiss Bluetooth prompt
+    func dismissBluetoothPrompt() {
+        DispatchQueue.main.async {
+            self.showingBluetoothPrompt = false
+        }
+    }
+    
+    /// Open iOS Settings (only for permission issues)
+    func openBluetoothSettings() {
+        // Only open settings for permission-related issues
+        guard bluetoothPromptType == .unauthorized else {
+            print("ℹ️ Settings not needed for simple Bluetooth off prompt")
+            return
+        }
+        
+        guard let settingsUrl = URL(string: UIApplication.openSettingsURLString) else {
+            print("❌ Failed to create settings URL")
+            return
+        }
+        
+        if UIApplication.shared.canOpenURL(settingsUrl) {
+            UIApplication.shared.open(settingsUrl) { success in
+                print(success ? "✅ Opened App Settings for permission" : "❌ Failed to open Settings")
+            }
+        }
+    }
+    
+    // MARK: - Private Methods
+    
+    private func performScan() {
         print("🔍 Starting BLE scan for room: \(targetRoom)")
         
         // Reset detection state
@@ -59,31 +170,6 @@ class StudentBLEManager: NSObject, ObservableObject {
         // Set timeout for scanning
         setupScanTimeout()
     }
-    
-    /// Stop scanning
-    func stopScanning() {
-        centralManager.stopScan()
-        isScanning = false
-        scanTimer?.invalidate()
-        scanTimer = nil
-        
-        if targetRoomDetected {
-            status = .deviceFound
-        } else {
-            status = .poweredOn
-        }
-        
-        print("⏹️ Stopped BLE scanning")
-    }
-    
-    /// Reset detection state
-    func resetDetection() {
-        targetRoomDetected = false
-        detectedDevice = nil
-        targetRoom = ""
-    }
-    
-    // MARK: - Private Methods
     
     private func setupScanTimeout() {
         scanTimer?.invalidate()
@@ -135,23 +221,15 @@ class StudentBLEManager: NSObject, ObservableObject {
     }
     
     private func doesDeviceMatchTargetRoom(deviceName: String) -> Bool {
-        // Device name format: "ROOM123" where ROOM is the room name and 123 are 3 digits
-        // We need to match the room part (ignoring the 3 digits at the end)
-        
         let cleanDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
-        // If the device name starts with our target room, it's a match
-        // This handles cases like "LT101123" matching target "LT101"
         if cleanDeviceName.hasPrefix(targetRoom) {
-            // Check if the remaining part is exactly 3 digits
             let remainingPart = String(cleanDeviceName.dropFirst(targetRoom.count))
             
-            // If remaining part is exactly 3 digits, it's a match
             if remainingPart.count == 3 && remainingPart.allSatisfy({ $0.isNumber }) {
                 return true
             }
             
-            // Also accept if the device name is exactly the target room
             if cleanDeviceName == targetRoom {
                 return true
             }
@@ -177,24 +255,55 @@ extension StudentBLEManager: CBCentralManagerDelegate {
             status = .poweredOn
             print("✅ Bluetooth is powered on")
             
+            // If we were waiting to scan, start now
+            if !targetRoom.isEmpty && !isScanning {
+                performScan()
+            }
+            
         case .poweredOff:
             status = .poweredOff
             isScanning = false
             targetRoomDetected = false
             detectedDevice = nil
-            print("❌ Bluetooth is powered off")
+            print("❌ Bluetooth is powered off (permission exists)")
+            
+            // Show simple turn-on prompt (permission already granted)
+            if !targetRoom.isEmpty {
+                showBluetoothPrompt(type: .poweredOff)
+            }
             
         case .unauthorized:
             status = .unauthorized
-            print("❌ Bluetooth permission denied")
+            isScanning = false
+            print("❌ Bluetooth permission denied by user")
+            
+            // Show permission prompt (user denied access)
+            if !targetRoom.isEmpty {
+                showBluetoothPrompt(type: .unauthorized)
+            }
             
         case .unsupported:
             status = .unsupported
+            isScanning = false
             print("❌ Bluetooth not supported on this device")
             
-        default:
+            if !targetRoom.isEmpty {
+                showBluetoothPrompt(type: .unsupported)
+            }
+            
+        case .resetting:
             status = .unknown
-            print("⚠️ Bluetooth state unknown")
+            isScanning = false
+            print("🔄 Bluetooth is resetting...")
+            
+        case .unknown:
+            status = .unknown
+            print("⚠️ Bluetooth state unknown - waiting for permission response...")
+            // Don't show prompts here - let iOS handle initial permission request
+            
+        @unknown default:
+            status = .unknown
+            print("⚠️ Unknown Bluetooth state encountered")
         }
     }
     
@@ -205,5 +314,63 @@ extension StudentBLEManager: CBCentralManagerDelegate {
         }
         
         processDiscoveredDevice(peripheral: peripheral, advertisementData: advertisementData, rssi: RSSI)
+    }
+}
+
+// MARK: - Bluetooth Prompt Types
+enum BluetoothPromptType {
+    case poweredOff        // Bluetooth is off but permission granted
+    case unauthorized      // Bluetooth permission denied
+    case unsupported      // Device doesn't support Bluetooth
+    
+    var title: String {
+        switch self {
+        case .poweredOff:
+            return "Bluetooth is Off"
+        case .unauthorized:
+            return "Bluetooth Permission Required"
+        case .unsupported:
+            return "Bluetooth Not Supported"
+        }
+    }
+    
+    var message: String {
+        switch self {
+        case .poweredOff:
+            return "Please turn on Bluetooth to detect classroom devices for attendance marking."
+        case .unauthorized:
+            return "Smart Attend needs Bluetooth access to detect classroom devices. Please enable Bluetooth permission in Settings."
+        case .unsupported:
+            return "This device doesn't support Bluetooth, which is required for attendance marking."
+        }
+    }
+    
+    var actionTitle: String {
+        switch self {
+        case .poweredOff:
+            return "Open Settings"
+        case .unauthorized:
+            return "Open Settings"
+        case .unsupported:
+            return "OK"
+        }
+    }
+    
+    var showSettings: Bool {
+        switch self {
+        case .poweredOff, .unauthorized:
+            return true
+        case .unsupported:
+            return false
+        }
+    }
+    
+    var isSimplePrompt: Bool {
+        switch self {
+        case .poweredOff:
+            return true  // Simple turn-on prompt
+        case .unauthorized, .unsupported:
+            return false // Full permission prompt
+        }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseFirestore
 
 struct StudentHomeView: View {
     let student: Student
@@ -12,6 +13,9 @@ struct StudentHomeView: View {
     @State private var currentStatus = "Checking for active sessions..."
     @State private var showingLogoutAlert = false
     @State private var showingRoomDetectionStart = false
+    @State private var showingAttendanceError = false
+    @State private var attendanceErrorMessage = ""
+    @State private var completedSessionId: String? // Track which session was completed
     
     var body: some View {
         NavigationView {
@@ -66,6 +70,13 @@ struct StudentHomeView: View {
             setupBLECallbacks()
             checkForActiveSession()
         }
+        .alert("Attendance Not Marked", isPresented: $showingAttendanceError) {
+            Button("OK") {
+                dismissAttendanceError()
+            }
+        } message: {
+            Text(attendanceErrorMessage)
+        }
         .alert("Logout", isPresented: $showingLogoutAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Logout", role: .destructive) {
@@ -80,6 +91,8 @@ struct StudentHomeView: View {
                     roomDetectionStartOverlay
                 } else if showingClassroomDetected {
                     classroomDetectedOverlay
+                } else if bleManager.showingBluetoothPrompt {
+                    bluetoothPromptOverlay
                 }
             }
         )
@@ -227,40 +240,30 @@ struct StudentHomeView: View {
     
     // MARK: - Action Buttons Section
     var actionButtonsSection: some View {
-        HStack(spacing: 12) {
-            // Refresh Button
-            Button(action: checkForActiveSession) {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Refresh")
-                }
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.blue)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.blue, lineWidth: 2)
-                )
-            }
-            .disabled(firebaseManager.isLoading)
+        HStack {
+            Spacer()
             
-            // Manual Start Detection Button (only show when scanning hasn't started)
-            if firebaseManager.isSessionActive && !bleManager.isScanning && !showingRoomDetectionStart {
-                Button(action: startBLEDetection) {
+            // Single intelligent room detection button (centered)
+            if !bleManager.isScanning && !showingRoomDetectionStart {
+                Button(action: startIntelligentDetection) {
                     HStack {
-                        Image(systemName: "wifi.circle")
-                        Text("Manual Detection")
+                        Image(systemName: detectionButtonIcon)
+                        Text(detectionButtonText)
                     }
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.orange, lineWidth: 1)
+                        LinearGradient(
+                            gradient: Gradient(colors: detectionButtonColors),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
+                    .cornerRadius(10)
                 }
+                .disabled(firebaseManager.isLoading)
             }
             
             Spacer()
@@ -385,8 +388,10 @@ struct StudentHomeView: View {
     // MARK: - Room Detection Start Overlay
     var roomDetectionStartOverlay: some View {
         ZStack {
-            Color.black.opacity(0.3)
+            Color.black.opacity(0.8)
                 .ignoresSafeArea()
+                .opacity(showingRoomDetectionStart ? 1.0 : 0.0)
+                .animation(.easeInOut(duration: 0.3), value: showingRoomDetectionStart)
             
             VStack(spacing: 20) {
                 Image(systemName: "wifi.circle")
@@ -409,13 +414,23 @@ struct StudentHomeView: View {
                 .opacity(showingRoomDetectionStart ? 1.0 : 0.0)
             }
             .scaleEffect(showingRoomDetectionStart ? 1.0 : 0.5)
+            .opacity(showingRoomDetectionStart ? 1.0 : 0.0)
+            .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.1), value: showingRoomDetectionStart)
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showingRoomDetectionStart)
         .onAppear {
-            // Auto-start BLE detection after 1.5 seconds
+            // Graceful entrance
+            withAnimation(.easeInOut(duration: 0.4)) {
+                showingRoomDetectionStart = true
+            }
+            
+            // Auto-start BLE detection after 1.5 seconds with graceful exit
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 actuallyStartBLEDetection()
-                showingRoomDetectionStart = false
+                
+                // Graceful exit animation
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showingRoomDetectionStart = false
+                }
             }
         }
     }
@@ -423,8 +438,10 @@ struct StudentHomeView: View {
     // MARK: - Classroom Detected Overlay
     var classroomDetectedOverlay: some View {
         ZStack {
-            Color.black.opacity(0.4)
+            Color.black.opacity(0.85)
                 .ignoresSafeArea()
+                .opacity(showingClassroomDetected ? 1.0 : 0.0)
+                .animation(.easeInOut(duration: 0.3), value: showingClassroomDetected)
             
             VStack(spacing: 24) {
                 Image(systemName: "location.circle.fill")
@@ -451,17 +468,171 @@ struct StudentHomeView: View {
                 .opacity(showingClassroomDetected ? 1.0 : 0.0)
             }
             .scaleEffect(showingClassroomDetected ? 1.0 : 0.5)
+            .opacity(showingClassroomDetected ? 1.0 : 0.0)
+            .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.1), value: showingClassroomDetected)
         }
-        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: showingClassroomDetected)
         .onAppear {
-            // Auto-start face authentication after 2 seconds
+            // Graceful entrance
+            withAnimation(.easeInOut(duration: 0.4)) {
+                showingClassroomDetected = true
+            }
+            
+            // Auto-start face authentication after 2 seconds with graceful exit
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                startFaceAuthentication()
+                // Graceful exit animation
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showingClassroomDetected = false
+                }
+                
+                // Start face authentication after exit completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    startFaceAuthentication()
+                }
             }
         }
     }
     
+    // MARK: - Attendance Error Overlay
+    var attendanceErrorOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                // Error Icon
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.orange.opacity(0.15),
+                                    Color.red.opacity(0.1)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 70, height: 70)
+                    
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.orange, Color.red]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                
+                VStack(spacing: 12) {
+                    Text("Attendance Not Marked")
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary)
+                    
+                    Text(attendanceErrorMessage)
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                        .lineLimit(nil)
+                }
+                
+                // Simple dismiss button
+                Button(action: dismissAttendanceError) {
+                    Text("OK")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 100)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.orange, Color.red]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(10)
+                }
+            }
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: Color.black.opacity(0.1), radius: 15, x: 0, y: 8)
+            )
+            .padding(.horizontal, 40)
+        }
+        .animation(.easeInOut(duration: 0.3), value: showingAttendanceError)
+    }
+    // MARK: - Bluetooth Prompt Overlay
+    var bluetoothPromptOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            
+            BluetoothPromptView(
+                promptType: bleManager.bluetoothPromptType,
+                onOpenSettings: {
+                    bleManager.openBluetoothSettings()
+                },
+                onRetry: {
+                    bleManager.retryScanning()
+                },
+                onDismiss: {
+                    bleManager.dismissBluetoothPrompt()
+                    resetToHomeState()
+                }
+            )
+        }
+        .animation(.easeInOut(duration: 0.3), value: bleManager.showingBluetoothPrompt)
+    }
+    
     // MARK: - Computed Properties
+    
+    /// Check if the current session was just completed
+    private var isCurrentSessionCompleted: Bool {
+        guard let activeSession = firebaseManager.activeSession,
+              let completedId = completedSessionId else {
+            return false
+        }
+        return activeSession.sessionId == completedId
+    }
+    
+    /// Dynamic button properties for intelligent detection
+    private var detectionButtonIcon: String {
+        if firebaseManager.isLoading {
+            return "clock"
+        } else if !firebaseManager.isSessionActive {
+            return "arrow.clockwise"
+        } else if isCurrentSessionCompleted {
+            return "repeat"
+        } else {
+            return "wifi.circle"
+        }
+    }
+    
+    private var detectionButtonText: String {
+        if firebaseManager.isLoading {
+            return "Checking..."
+        } else if !firebaseManager.isSessionActive {
+            return "Check for Session"
+        } else if isCurrentSessionCompleted {
+            return "Mark Again"
+        } else {
+            return "Start Room Presence Detection"
+        }
+    }
+    
+    private var detectionButtonColors: [Color] {
+        if !firebaseManager.isSessionActive {
+            return [Color.orange, Color.red]  // Check for session
+        } else if isCurrentSessionCompleted {
+            return [Color.green, Color.blue]  // Mark again
+        } else {
+            return [Color.blue, Color.purple] // Start detection
+        }
+    }
     
     var sessionStatusIcon: String {
         if firebaseManager.isLoading {
@@ -548,14 +719,24 @@ struct StudentHomeView: View {
             
             await MainActor.run {
                 if firebaseManager.isSessionActive {
-                    currentStatus = "Active session found! Starting room detection..."
+                    // Check if this is a NEW session (different from completed one)
+                    let isNewSession = !isCurrentSessionCompleted
                     
-                    // Automatically start BLE detection with overlay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        self.startBLEDetectionWithOverlay()
+                    if isNewSession {
+                        currentStatus = "Active session found! Starting room detection..."
+                        
+                        // Automatically start BLE detection for NEW sessions
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            self.startBLEDetectionWithOverlay()
+                        }
+                    } else {
+                        currentStatus = "Active session found! Ready for detection."
+                        // Don't auto-start for completed sessions
                     }
                 } else {
                     currentStatus = "No active session for your class."
+                    // Clear completion state when no session
+                    completedSessionId = nil
                     // Stop any ongoing BLE scanning
                     bleManager.stopScanning()
                     bleManager.resetDetection()
@@ -599,16 +780,31 @@ struct StudentHomeView: View {
     private func startFaceAuthentication() {
         showingClassroomDetected = false
         
-        // Create attendance session
-        if let device = bleManager.detectedDevice,
-           let session = firebaseManager.activeSession {
-            attendanceManager.currentSession = AttendanceSession(
-                device: device,
-                subjectCode: session.subject
-            )
-            
-            // Start face authentication
-            attendanceManager.showingFaceAuthentication = true
+        // Check attendance rules BEFORE starting face authentication
+        guard let device = bleManager.detectedDevice,
+              let session = firebaseManager.activeSession else {
+            showAttendanceError(message: "Session data not available")
+            return
+        }
+        
+        // Create attendance session for checking
+        let tempSession = AttendanceSession(
+            device: device,
+            subjectCode: session.subject
+        )
+        
+        // Check if attendance can be marked
+        checkAttendanceEligibility(session: session, device: device) { canMark, errorMessage in
+            DispatchQueue.main.async {
+                if canMark {
+                    // Attendance allowed - proceed with face authentication
+                    self.attendanceManager.currentSession = tempSession
+                    self.attendanceManager.showingFaceAuthentication = true
+                } else {
+                    // Attendance not allowed - show error
+                    self.showAttendanceError(message: errorMessage ?? "Attendance cannot be marked")
+                }
+            }
         }
     }
     
@@ -621,6 +817,20 @@ struct StudentHomeView: View {
         
         print("✅ Face authentication successful for roll number: \(rollNumber)")
         
+        // CRITICAL: Validate that face auth roll number matches logged-in student
+        guard rollNumber == student.rollNumber else {
+            print("❌ Roll number mismatch: Face auth returned \(rollNumber), but logged-in student is \(student.rollNumber)")
+            
+            // Hide face authentication
+            attendanceManager.showingFaceAuthentication = false
+            
+            // Show security error
+            showAttendanceError(message: "Face authentication failed: Roll number mismatch. Please ensure you are the logged-in student.")
+            return
+        }
+        
+        print("✅ Roll number validated: \(rollNumber) matches logged-in student")
+        
         // Complete the session
         let result = FaceIOResult(
             rollNumber: rollNumber,
@@ -631,7 +841,7 @@ struct StudentHomeView: View {
         currentSession.complete(with: result)
         attendanceManager.currentSession = currentSession
         
-        // Mark attendance in Firebase
+        // Mark attendance in Firebase (rules already checked)
         firebaseManager.markAttendance(
             student: student,
             session: activeSession,
@@ -648,11 +858,18 @@ struct StudentHomeView: View {
                     self.attendanceManager.showingFaceAuthentication = false
                     self.attendanceManager.showingSuccess = true
                     
+                    // Mark this specific session as completed
+                    self.completedSessionId = activeSession.sessionId
+                    
                 case .failure(let error):
-                    print("❌ Failed to mark attendance in Firebase: \(error)")
-                    // Show error and reset
-                    self.attendanceManager.handleFaceAuthenticationError("Failed to mark attendance: \(error.localizedDescription)")
-                    self.resetToHomeState()
+                    print("❌ Unexpected error after face auth: \(error)")
+                    
+                    // Hide face authentication
+                    self.attendanceManager.showingFaceAuthentication = false
+                    
+                    // Show error (this should rarely happen since we pre-checked)
+                    let errorMessage = self.formatAttendanceError(error)
+                    self.showAttendanceError(message: errorMessage)
                 }
             }
         }
@@ -664,6 +881,154 @@ struct StudentHomeView: View {
         bleManager.stopScanning()
         bleManager.resetDetection()
         attendanceManager.currentSession = nil
+    }
+    
+    // MARK: - New Methods for Enhanced Flow
+    
+    /// Show native attendance error alert
+    private func showAttendanceError(message: String) {
+        print("🚨 Showing attendance error: \(message)")
+        attendanceErrorMessage = message
+        showingAttendanceError = true
+        resetToHomeState()
+    }
+    
+    /// Dismiss attendance error alert
+    private func dismissAttendanceError() {
+        attendanceErrorMessage = ""
+        // Alert automatically dismisses, no need to set showingAttendanceError = false
+    }
+    
+    /// Restart detection for marking again (after successful attendance)
+    private func restartDetection() {
+        completedSessionId = nil // Clear completion state
+        startBLEDetection()
+    }
+    
+    /// Intelligent detection that handles all scenarios
+    private func startIntelligentDetection() {
+        if firebaseManager.isLoading {
+            // Already loading, do nothing
+            return
+        } else if !firebaseManager.isSessionActive {
+            // No active session - refresh to check for new sessions
+            checkForActiveSession()
+        } else if isCurrentSessionCompleted {
+            // Session completed - restart for marking again
+            restartDetection()
+        } else {
+            // Active session available - start BLE detection
+            startBLEDetectionWithOverlay()
+        }
+    }
+    
+    /// Format attendance error for user-friendly display
+    private func formatAttendanceError(_ error: Error) -> String {
+        if let attendanceError = error as? AttendanceError {
+            switch attendanceError {
+            case .alreadyMarked:
+                return "Attendance already marked for this session today"
+            case .noActiveSession:
+                return "No active session found"
+            case .invalidSession:
+                return "Invalid session data"
+            }
+        } else {
+            // Handle other Firebase/network errors
+            let errorDescription = error.localizedDescription
+            if errorDescription.contains("network") || errorDescription.contains("internet") {
+                return "Network connection error. Please check your internet."
+            } else if errorDescription.contains("permission") {
+                return "Permission denied. Please check app settings."
+            } else {
+                return "Failed to save attendance. Please try again."
+            }
+        }
+    }
+    
+    /// Check attendance eligibility before face authentication
+    private func checkAttendanceEligibility(session: ActiveSession, device: BLEDevice, completion: @escaping (Bool, String?) -> Void) {
+        let currentDate = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: currentDate)
+        
+        // Create monthly collection name
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "yyyy_MM"
+        let monthString = monthFormatter.string(from: currentDate)
+        let collectionName = "attendance_\(monthString)"
+        
+        // Use the same logic as FirebaseManager
+        checkIfAttendanceAlreadyMarkedLocal(
+            collectionName: collectionName,
+            rollNumber: student.rollNumber,
+            subject: session.subject,
+            type: session.type,
+            date: dateString,
+            isExtra: session.isExtra ?? false
+        ) { alreadyMarked in
+            if alreadyMarked {
+                let errorMessage = (session.isExtra ?? false) ?
+                    "Extra class attendance already marked for \(session.subject) today" :
+                    "Attendance already marked for \(session.type) today"
+                completion(false, errorMessage)
+            } else {
+                completion(true, nil)
+            }
+        }
+    }
+    
+    /// Local duplicate check method (mirrors FirebaseManager logic)
+    private func checkIfAttendanceAlreadyMarkedLocal(
+        collectionName: String,
+        rollNumber: String,
+        subject: String,
+        type: String,
+        date: String,
+        isExtra: Bool,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let db = Firestore.firestore()
+        let baseQuery = db.collection(collectionName)
+            .whereField("rollNumber", isEqualTo: rollNumber)
+            .whereField("subject", isEqualTo: subject)
+            .whereField("date", isEqualTo: date)
+            .whereField("present", isEqualTo: true)
+        
+        if isExtra {
+            // For extra classes: Check if ANY extra class already marked for this subject today
+            let extraQuery = baseQuery.whereField("isExtra", isEqualTo: true)
+            
+            extraQuery.getDocuments { snapshot, error in
+                if let error = error {
+                    print("❌ Error checking existing extra attendance: \(error)")
+                    completion(false) // Assume not marked to avoid blocking
+                    return
+                }
+                
+                let documents = snapshot?.documents ?? []
+                let alreadyMarked = !documents.isEmpty
+                completion(alreadyMarked)
+            }
+        } else {
+            // For regular classes: Check if same type already marked (exclude extra classes)
+            let regularQuery = baseQuery
+                .whereField("type", isEqualTo: type)
+                .whereField("isExtra", isEqualTo: false)
+            
+            regularQuery.getDocuments { snapshot, error in
+                if let error = error {
+                    print("❌ Error checking existing regular attendance: \(error)")
+                    completion(false) // Assume not marked to avoid blocking
+                    return
+                }
+                
+                let documents = snapshot?.documents ?? []
+                let alreadyMarked = !documents.isEmpty
+                completion(alreadyMarked)
+            }
+        }
     }
     
     private func formatRelativeTime(_ date: Date) -> String {

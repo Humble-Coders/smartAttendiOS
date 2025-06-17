@@ -1,41 +1,26 @@
 import SwiftUI
 
 struct MainAppView: View {
-    @State private var currentStudent: Student?
-    @State private var isLoggedIn = false
+    @StateObject private var authManager = StudentAuthManager()
     
     var body: some View {
         Group {
-            if isLoggedIn, let student = currentStudent {
+            if authManager.isLoading {
+                SplashScreenView()
+            } else if authManager.isLoggedIn, let student = authManager.currentStudent {
                 StudentHomeView(
                     student: student,
-                    onLogout: handleLogout
+                    onLogout: authManager.logout
                 )
             } else {
                 LoginView(onLoginSuccess: handleLogin)
             }
         }
-        .animation(.easeInOut(duration: 0.5), value: isLoggedIn)
+        .animation(.easeInOut(duration: 0.5), value: authManager.isLoggedIn)
+        .animation(.easeInOut(duration: 0.3), value: authManager.isLoading)
     }
     
-    private func handleLogin(student: Student) {
-        currentStudent = student
-        isLoggedIn = true
-        
-        print("✅ Student logged in:")
-        print("   👤 Name: \(student.name)")
-        print("   🎓 Roll: \(student.rollNumber)")
-        print("   📚 Class: \(student.className)")
+    private func handleLogin(name: String, rollNumber: String, className: String) -> Bool {
+        return authManager.login(name: name, rollNumber: rollNumber, className: className)
     }
-    
-    private func handleLogout() {
-        currentStudent = nil
-        isLoggedIn = false
-        
-        print("👋 Student logged out")
-    }
-}
-
-#Preview {
-    MainAppView()
 }

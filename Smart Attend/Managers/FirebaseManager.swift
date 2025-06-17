@@ -11,6 +11,7 @@ struct ActiveSession {
     let type: String // "lect", "lab", "tut"
     let sessionId: String
     let date: String
+    let isExtra: Bool? // New field for extra classes
     
     init(from data: [String: Any]) {
         self.isActive = data["isActive"] as? Bool ?? false
@@ -19,6 +20,7 @@ struct ActiveSession {
         self.type = data["type"] as? String ?? ""
         self.sessionId = data["sessionId"] as? String ?? ""
         self.date = data["date"] as? String ?? ""
+        self.isExtra = data["isExtra"] as? Bool // New field
     }
 }
 
@@ -31,6 +33,7 @@ struct AttendanceRecord {
     let present: Bool
     let timestamp: Date?
     let deviceRoom: String? // Room number with 3 digits from BLE device
+    let isExtra: Bool // New field for extra classes
     
     func toDictionary() -> [String: Any] {
         var dict: [String: Any] = [
@@ -39,7 +42,8 @@ struct AttendanceRecord {
             "subject": subject,
             "group": group,
             "type": type,
-            "present": present
+            "present": present,
+            "isExtra": isExtra
         ]
         
         if let timestamp = timestamp {
@@ -89,6 +93,7 @@ class FirebaseManager: ObservableObject {
                     print("   📖 Subject: \(session.subject)")
                     print("   🏢 Room: \(session.room)")
                     print("   📝 Type: \(session.type)")
+                    print("   ⭐ Extra: \(session.isExtra ?? false)")
                 } else {
                     self.activeSession = nil
                     self.isSessionActive = false
@@ -106,9 +111,9 @@ class FirebaseManager: ObservableObject {
         }
     }
     
-    // MARK: - Attendance Marking
+    // MARK: - Enhanced Attendance Marking
     
-    /// Mark attendance for a student
+    /// Mark attendance for a student with enhanced duplicate checking
     func markAttendance(
         student: Student,
         session: ActiveSession,
@@ -135,15 +140,18 @@ class FirebaseManager: ObservableObject {
             type: session.type,
             present: true,
             timestamp: currentDate,
-            deviceRoom: detectedDevice.name // Store the full device name (room + 3 digits)
+            deviceRoom: detectedDevice.name,
+            isExtra: session.isExtra ?? false
         )
         
-        // Check if attendance already marked today
+        // Enhanced duplicate check considering type and isExtra
         checkIfAttendanceAlreadyMarked(
             collectionName: collectionName,
             rollNumber: student.rollNumber,
             subject: session.subject,
-            date: dateString
+            type: session.type,
+            date: dateString,
+            isExtra: session.isExtra ?? false
         ) { [weak self] alreadyMarked in
             
             if alreadyMarked {
@@ -162,39 +170,78 @@ class FirebaseManager: ObservableObject {
                         print("✅ Attendance marked successfully!")
                         print("   👤 Student: \(student.rollNumber)")
                         print("   📚 Subject: \(session.subject)")
+                        print("   📝 Type: \(session.type)")
                         print("   🏢 Device Room: \(detectedDevice.name)")
                         print("   📅 Date: \(dateString)")
+                        print("   ⭐ Extra: \(session.isExtra ?? false)")
                         print("   🕐 Time: \(currentDate)")
                     }
                 }
         }
     }
     
+    /// Enhanced duplicate check with type and extra class support
     private func checkIfAttendanceAlreadyMarked(
         collectionName: String,
         rollNumber: String,
         subject: String,
+        type: String,
         date: String,
+        isExtra: Bool,
         completion: @escaping (Bool) -> Void
     ) {
-        db.collection(collectionName)
+        // Build base query
+        let baseQuery = db.collection(collectionName)
             .whereField("rollNumber", isEqualTo: rollNumber)
             .whereField("subject", isEqualTo: subject)
             .whereField("date", isEqualTo: date)
             .whereField("present", isEqualTo: true)
-            .getDocuments { snapshot, error in
+        
+        if isExtra {
+            // For extra classes: Check if ANY extra class already marked for this subject today
+            let extraQuery = baseQuery.whereField("isExtra", isEqualTo: true)
+            
+            extraQuery.getDocuments { snapshot, error in
                 if let error = error {
-                    print("❌ Error checking existing attendance: \(error)")
+                    print("❌ Error checking existing extra attendance: \(error)")
                     completion(false) // Assume not marked to avoid blocking
                     return
                 }
                 
-                let alreadyMarked = !(snapshot?.documents.isEmpty ?? true)
+                let documents = snapshot?.documents ?? []
+                let alreadyMarked = !documents.isEmpty
+                
                 if alreadyMarked {
-                    print("⚠️ Attendance already marked for today")
+                    print("⚠️ Extra class attendance already marked for \(subject) today")
+                } else {
+                    print("✅ No extra class attendance found for \(subject) today - proceeding")
                 }
                 completion(alreadyMarked)
             }
+        } else {
+            // For regular classes: Check if same type already marked (exclude extra classes)
+            let regularQuery = baseQuery
+                .whereField("type", isEqualTo: type)
+                .whereField("isExtra", isEqualTo: false)
+            
+            regularQuery.getDocuments { snapshot, error in
+                if let error = error {
+                    print("❌ Error checking existing regular attendance: \(error)")
+                    completion(false) // Assume not marked to avoid blocking
+                    return
+                }
+                
+                let documents = snapshot?.documents ?? []
+                let alreadyMarked = !documents.isEmpty
+                
+                if alreadyMarked {
+                    print("⚠️ Regular \(type) attendance already marked today")
+                } else {
+                    print("✅ No \(type) attendance found for today - proceeding")
+                }
+                completion(alreadyMarked)
+            }
+        }
     }
     
     // MARK: - Utility Methods
