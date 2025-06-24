@@ -386,7 +386,7 @@ private func getFaceIOHTML() -> String {
             function initializeFaceIO() {
                 try {
                     log('Initializing Face.io...');
-                    faceio = new faceIO('fioa264a');
+                    faceio = new faceIO('fioa1175');
                     
                     updateStatus('✨ Ready for authentication', 'success');
                     container.classList.add('pulse');

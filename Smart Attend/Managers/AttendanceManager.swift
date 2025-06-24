@@ -13,6 +13,10 @@ class AttendanceManager: ObservableObject {
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
     
+    // MARK: - Error State Properties (ADD TO EXISTING CLASS)
+    @Published var showingError = false
+    @Published var currentError: FaceIOError?
+    
     // MARK: - Public Methods
     
     /// Start attendance process for detected device
@@ -87,16 +91,86 @@ class AttendanceManager: ObservableObject {
         logAttendanceMarked(session: session)
     }
     
-    /// Handle face authentication error
+    /// Handle face authentication error with proper error state management
     func handleFaceAuthenticationError(_ error: String) {
         print("❌ Face authentication error: \(error)")
         
-        // For now, just close the face authentication
-        // You could show an error dialog here if needed
+        // Parse error to FaceIOError if it's a numeric code
+        let faceIOError: FaceIOError
+        if let errorCode = Int(error) {
+            faceIOError = FaceIOError.fromErrorCode(errorCode)
+        } else {
+            // Handle string errors
+            faceIOError = parseFaceIOError(from: error)
+        }
+        
+        // Set error state
+        currentError = faceIOError
+        
+        // Hide face authentication and show error
         showingFaceAuthentication = false
         
-        // Reset current session
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.showingError = true
+        }
+    }
+    
+    /// Handle retry from error screen
+    func retryFaceAuthentication() {
+        print("🔄 Retrying face authentication")
+        
+        // Hide error screen
+        showingError = false
+        currentError = nil
+        
+        // Small delay for smooth transition, then show face authentication again
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.showingFaceAuthentication = true
+        }
+    }
+    
+    /// Dismiss error screen and return to home
+    func dismissError() {
+        print("🏠 Dismissing error and returning to home")
+        
+        showingError = false
+        currentError = nil
         currentSession = nil
+    }
+    
+    // MARK: - Private Helper Method (ADD TO EXISTING CLASS)
+
+    /// Parse string errors to FaceIOError
+    private func parseFaceIOError(from errorString: String) -> FaceIOError {
+        let lowercaseError = errorString.lowercased()
+        
+        if lowercaseError.contains("camera") && lowercaseError.contains("permission") {
+            return .cameraPermissionDenied
+        } else if lowercaseError.contains("no face") || lowercaseError.contains("face not detected") {
+            return .noFaceDetected
+        } else if lowercaseError.contains("not recognized") || lowercaseError.contains("face not recognized") {
+            return .faceNotRecognized
+        } else if lowercaseError.contains("multiple") {
+            return .multipleFacesDetected
+        } else if lowercaseError.contains("spoof") {
+            return .faceSpoofingDetected
+        } else if lowercaseError.contains("network") || lowercaseError.contains("connection") {
+            return .networkError
+        } else if lowercaseError.contains("unauthorized") {
+            return .unauthorized
+        } else if lowercaseError.contains("timeout") || lowercaseError.contains("timed out") {
+            return .operationTimedOut
+        } else if lowercaseError.contains("session") && lowercaseError.contains("expired") {
+            return .sessionExpired
+        } else if lowercaseError.contains("too many") {
+            return .tooManyRequests
+        } else if lowercaseError.contains("initialization") || lowercaseError.contains("initialize") {
+            return .initializationFailed
+        } else if lowercaseError.contains("cancelled") || lowercaseError.contains("closed") {
+            return .processingError
+        } else {
+            return .unknown(code: 0)
+        }
     }
     
     /// Dismiss success screen and return to home
