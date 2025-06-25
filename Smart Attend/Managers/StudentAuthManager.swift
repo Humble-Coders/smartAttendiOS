@@ -7,6 +7,7 @@ final class StudentAuthManager: ObservableObject {
     @Published var currentStudent: Student?
     @Published var isLoggedIn: Bool = false
     @Published var isLoading: Bool = true
+    @Published var faceRegistrationResult: FaceRegistrationResult?
     
     // MARK: - Initialization
     init() {
@@ -16,7 +17,7 @@ final class StudentAuthManager: ObservableObject {
     // MARK: - Public Methods
     
     /// Login student and save credentials
-    func login(name: String, rollNumber: String, className: String) -> Bool {
+    func login(name: String, rollNumber: String, className: String, faceRegistrationResult: FaceRegistrationResult? = nil) -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedRoll = rollNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -33,6 +34,12 @@ final class StudentAuthManager: ObservableObject {
         }
         
         UserDefaultsManager.saveStudentData(name: trimmedName, className: trimmedClass)
+        
+        // Save face registration result if provided
+        if let faceResult = faceRegistrationResult {
+            self.faceRegistrationResult = faceResult
+            UserDefaultsManager.saveFaceRegistrationData(faceId: faceResult.faceId)
+        }
         
         // Update current state
         let student = Student(
@@ -59,6 +66,8 @@ final class StudentAuthManager: ObservableObject {
         // Clear secure storage
         _ = KeychainHelper.clearAllKeychainData()
         UserDefaultsManager.clearUserData()
+        
+        self.faceRegistrationResult = nil
         
         // Update state
         DispatchQueue.main.async {
@@ -93,6 +102,7 @@ final class StudentAuthManager: ObservableObject {
                     self.isLoading = false
                     self.isLoggedIn = false
                     self.currentStudent = nil
+                    self.faceRegistrationResult = nil
                 }
                 
                 print("ℹ️ No valid stored login found")
@@ -105,6 +115,15 @@ final class StudentAuthManager: ObservableObject {
                 rollNumber: rollNumber,
                 className: className
             )
+            
+            // Restore face registration data if available
+            let faceId = UserDefaultsManager.getFaceRegistrationId()
+            if let faceId = faceId {
+                self.faceRegistrationResult = FaceRegistrationResult(
+                    rollNumber: rollNumber,
+                    faceId: faceId
+                )
+            }
             
             // Calculate remaining time to show splash
             let elapsed = Date().timeIntervalSince(startTime)
@@ -120,6 +139,9 @@ final class StudentAuthManager: ObservableObject {
             print("   👤 Name: \(name)")
             print("   🎓 Roll: \(rollNumber)")
             print("   📚 Class: \(className)")
+            if let faceId = faceId {
+                print("   🔐 Face ID: \(String(faceId.prefix(8)))...")
+            }
         }
     }
     

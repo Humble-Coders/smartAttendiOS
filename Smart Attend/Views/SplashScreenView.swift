@@ -90,8 +90,8 @@ struct SplashScreenView: View {
                             LinearGradient(
                                 colors: [
                                     .clear,
-                                    .white.opacity(0.6), // Increased from 0.4 to 0.6
-                                    .white.opacity(0.7), // Added middle stop for more prominence
+                                    .white.opacity(0.6),
+                                    .white.opacity(0.7),
                                     .white.opacity(0.6),
                                     .clear
                                 ],
@@ -99,49 +99,63 @@ struct SplashScreenView: View {
                                 endPoint: .trailing
                             )
                         )
-                        .frame(height: 1.5) // Slightly thicker
-                        .frame(maxWidth: 160) // Slightly wider
+                        .frame(height: 1.5)
+                        .frame(maxWidth: 180)
                         .opacity(brandingOpacity)
                         .scaleEffect(x: brandingOpacity, y: 1.0, anchor: .center)
                     
-                    // Refined branding text with sophisticated left-to-right reveal
-                    HStack(spacing: 6) {
-                        Group {
-                            Text("A")
+                    // College name in two lines for better readability
+                    VStack(spacing: 2) {
+                        // First line: THAPAR INSTITUTE
+                        HStack(spacing: 4) {
+                            Text("THAPAR")
                                 .opacity(brandingOpacity > 0 ? 1.0 : 0.0)
-                                .offset(x: brandingOpacity > 0 ? 0 : -30)
-                                .animation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0), value: brandingOpacity)
+                                .offset(x: brandingOpacity > 0 ? 0 : -20)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.1), value: brandingOpacity)
                             
-                            Text("Humble")
-                                .opacity(brandingOpacity > 0.15 ? 1.0 : 0.0)
-                                .offset(x: brandingOpacity > 0.15 ? 0 : -30)
-                                .animation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0).delay(0.15), value: brandingOpacity)
-                            
-                            Text("Solutions")
-                                .opacity(brandingOpacity > 0.3 ? 1.0 : 0.0)
-                                .offset(x: brandingOpacity > 0.3 ? 0 : -30)
-                                .animation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0).delay(0.3), value: brandingOpacity)
-                            
-                            Text("Product")
-                                .opacity(brandingOpacity > 0.45 ? 1.0 : 0.0)
-                                .offset(x: brandingOpacity > 0.45 ? 0 : -30)
-                                .animation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0).delay(0.45), value: brandingOpacity)
+                            Text("INSTITUTE")
+                                .opacity(brandingOpacity > 0.2 ? 1.0 : 0.0)
+                                .offset(x: brandingOpacity > 0.2 ? 0 : -20)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.3), value: brandingOpacity)
                         }
-                        .font(.system(size: 17, weight: .semibold, design: .serif))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    .white,
-                                    .white.opacity(0.95)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        
+                        // Second line: OF ENGINEERING & TECHNOLOGY
+                        HStack(spacing: 3) {
+                            Text("OF")
+                                .opacity(brandingOpacity > 0.4 ? 1.0 : 0.0)
+                                .offset(x: brandingOpacity > 0.4 ? 0 : -15)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.5), value: brandingOpacity)
+                            
+                            Text("ENGINEERING")
+                                .opacity(brandingOpacity > 0.6 ? 1.0 : 0.0)
+                                .offset(x: brandingOpacity > 0.6 ? 0 : -15)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.7), value: brandingOpacity)
+                            
+                            Text("&")
+                                .opacity(brandingOpacity > 0.8 ? 1.0 : 0.0)
+                                .offset(x: brandingOpacity > 0.8 ? 0 : -10)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.9), value: brandingOpacity)
+                            
+                            Text("TECHNOLOGY")
+                                .opacity(brandingOpacity > 0.9 ? 1.0 : 0.0)
+                                .offset(x: brandingOpacity > 0.9 ? 0 : -15)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(1.1), value: brandingOpacity)
+                        }
                     }
-                    .tracking(2.0) // Premium letter spacing
-                    .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4) // Strong shadow for prominence
-                    .shadow(color: .white.opacity(0.1), radius: 2, x: 0, y: -1) // Subtle highlight for depth
+                    .font(.system(size: 14, weight: .medium, design: .serif))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                .white,
+                                .white.opacity(0.95)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .tracking(1.2)
+                    .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
+                    .shadow(color: .white.opacity(0.1), radius: 2, x: 0, y: -1)
                 }
                 .padding(.bottom, 50)
             }

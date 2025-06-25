@@ -1,8 +1,9 @@
 import SwiftUI
 import WebKit
 
-struct FaceIOWebView: UIViewRepresentable {
-    let onAuthenticated: (String) -> Void
+struct FaceRegistrationWebView: UIViewRepresentable {
+    let rollNumber: String
+    let onFaceRegistered: (String) -> Void
     let onError: (String) -> Void
     let onClose: () -> Void
     
@@ -27,13 +28,13 @@ struct FaceIOWebView: UIViewRepresentable {
         webView.scrollView.bounces = false
         
         // Message handlers
-        let messageHandlers = ["onAuthenticated", "onError", "onLog", "onClose"]
+        let messageHandlers = ["onFaceRegistered", "onError", "onLog", "onClose"]
         for handler in messageHandlers {
             webView.configuration.userContentController.add(context.coordinator, name: handler)
         }
         
         // Load HTML content
-        let htmlString = getFaceIOHTML()
+        let htmlString = getFaceRegistrationHTML(rollNumber: rollNumber)
         webView.loadHTMLString(htmlString, baseURL: URL(string: "https://localhost"))
         
         return webView
@@ -42,16 +43,16 @@ struct FaceIOWebView: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {}
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(onAuthenticated: onAuthenticated, onError: onError, onClose: onClose)
+        Coordinator(onFaceRegistered: onFaceRegistered, onError: onError, onClose: onClose)
     }
     
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-        let onAuthenticated: (String) -> Void
+        let onFaceRegistered: (String) -> Void
         let onError: (String) -> Void
         let onClose: () -> Void
         
-        init(onAuthenticated: @escaping (String) -> Void, onError: @escaping (String) -> Void, onClose: @escaping () -> Void) {
-            self.onAuthenticated = onAuthenticated
+        init(onFaceRegistered: @escaping (String) -> Void, onError: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+            self.onFaceRegistered = onFaceRegistered
             self.onError = onError
             self.onClose = onClose
         }
@@ -59,9 +60,9 @@ struct FaceIOWebView: UIViewRepresentable {
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             DispatchQueue.main.async {
                 switch message.name {
-                case "onAuthenticated":
-                    if let rollNumber = message.body as? String {
-                        self.onAuthenticated(rollNumber)
+                case "onFaceRegistered":
+                    if let faceId = message.body as? String {
+                        self.onFaceRegistered(faceId)
                     }
                 case "onError":
                     if let error = message.body as? String {
@@ -71,7 +72,7 @@ struct FaceIOWebView: UIViewRepresentable {
                     self.onClose()
                 case "onLog":
                     if let logMessage = message.body as? String {
-                        print("🔍 Face.io: \(logMessage)")
+                        print("🔍 Face Registration: \(logMessage)")
                     }
                 default:
                     break
@@ -79,47 +80,37 @@ struct FaceIOWebView: UIViewRepresentable {
             }
         }
         
-        // Enhanced media capture permission handling
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            print("📹 Media capture permission requested for: \(origin.host ?? "unknown")")
+            print("📹 Media capture permission requested for face registration: \(origin.host ?? "unknown")")
             decisionHandler(.grant)
         }
         
-        // Handle JavaScript alerts
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
             print("⚠️ JavaScript Alert: \(message)")
             completionHandler()
         }
         
-        // Navigation delegate methods
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            print("✅ WebView finished loading")
+            print("✅ Face Registration WebView finished loading")
         }
         
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            print("❌ WebView navigation failed: \(error.localizedDescription)")
+            print("❌ Face Registration WebView navigation failed: \(error.localizedDescription)")
             DispatchQueue.main.async {
-                self.onError("Failed to load authentication: \(error.localizedDescription)")
-            }
-        }
-        
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            print("❌ WebView provisional navigation failed: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.onError("Failed to initialize: \(error.localizedDescription)")
+                self.onError("Failed to load face registration: \(error.localizedDescription)")
             }
         }
     }
 }
 
-private func getFaceIOHTML() -> String {
+private func getFaceRegistrationHTML(rollNumber: String) -> String {
     return """
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-        <title>Face Authentication</title>
+        <title>Face Registration</title>
         <style>
             * {
                 margin: 0;
@@ -134,7 +125,7 @@ private func getFaceIOHTML() -> String {
                 align-items: center;
                 justify-content: center;
                 min-height: 100vh;
-                background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
                 overflow: hidden;
                 -webkit-user-select: none;
@@ -155,11 +146,6 @@ private func getFaceIOHTML() -> String {
                 transition: all 0.3s ease;
             }
             
-            .scanning .container {
-                opacity: 0.1;
-                pointer-events: none;
-            }
-            
             .icon {
                 font-size: 56px;
                 margin-bottom: 20px;
@@ -176,9 +162,20 @@ private func getFaceIOHTML() -> String {
             
             .subtitle {
                 color: #718096;
-                margin-bottom: 24px;
+                margin-bottom: 12px;
                 font-size: 16px;
                 font-weight: 500;
+            }
+            
+            .roll-number {
+                background-color: #e3f2fd;
+                color: #1565c0;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 18px;
+                margin-bottom: 20px;
+                border: 2px solid #1976d2;
             }
             
             .info {
@@ -220,7 +217,7 @@ private func getFaceIOHTML() -> String {
             }
             
             .button {
-                background: linear-gradient(135deg, #4facfe, #00f2fe);
+                background: linear-gradient(135deg, #667eea, #764ba2);
                 color: white;
                 border: none;
                 padding: 16px 32px;
@@ -230,7 +227,7 @@ private func getFaceIOHTML() -> String {
                 font-size: 16px;
                 font-weight: 700;
                 transition: all 0.2s ease;
-                box-shadow: 0 8px 25px rgba(79, 172, 254, 0.3);
+                box-shadow: 0 8px 25px rgba(103, 126, 234, 0.3);
                 min-width: 140px;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
@@ -238,36 +235,11 @@ private func getFaceIOHTML() -> String {
             
             .button:hover {
                 transform: translateY(-2px);
-                box-shadow: 0 12px 35px rgba(79, 172, 254, 0.4);
-            }
-            
-            .button:active {
-                transform: translateY(0);
+                box-shadow: 0 12px 35px rgba(103, 126, 234, 0.4);
             }
             
             .close-button {
-                position: absolute;
-                top: 20px;
-                right: 20px;
-                background: rgba(255, 255, 255, 0.9);
-                color: #333;
-                border: none;
-                width: 40px;
-                height: 40px;
-                border-radius: 50%;
-                cursor: pointer;
-                font-size: 18px;
-                font-weight: bold;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.2s ease;
-                backdrop-filter: blur(10px);
-            }
-            
-            .close-button:hover {
-                background: rgba(255, 255, 255, 1);
-                transform: scale(1.1);
+                display: none;
             }
             
             @keyframes pulse {
@@ -276,68 +248,24 @@ private func getFaceIOHTML() -> String {
                 100% { transform: scale(1); }
             }
             
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            
             .pulse {
                 animation: pulse 2s infinite ease-in-out;
-            }
-            
-            .spin {
-                animation: spin 2s linear infinite;
-            }
-            
-            .scanning-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                z-index: 1000;
-                background: rgba(0, 0, 0, 0.8);
-                display: none;
-                align-items: center;
-                justify-content: center;
-                backdrop-filter: blur(5px);
-            }
-            
-            .scanning-message {
-                background: rgba(255, 255, 255, 0.95);
-                color: #333;
-                padding: 30px;
-                border-radius: 20px;
-                text-align: center;
-                font-size: 18px;
-                font-weight: 600;
-                box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-            }
-            
-            /* Remove the scanning overlay display - let Face.io handle the UI */
-            .scanning .scanning-overlay {
-                display: none;
             }
         </style>
     </head>
     <body>
-        <button class="close-button" onclick="closeAuth()" aria-label="Close">×</button>
-        
-        <div class="scanning-overlay">
-            <div class="scanning-message">
-                <div class="icon spin">📷</div>
-                <div>Face scanning in progress...</div>
-                <div style="font-size: 14px; margin-top: 10px; opacity: 0.7;">Please look directly at the camera</div>
-            </div>
-        </div>
-        
         <div class="container">
-            <div class="icon">🔐</div>
-            <h2>Face Authentication</h2>
-            <p class="subtitle">Secure biometric verification</p>
-            <p class="info">Position your face within the camera frame for quick and secure authentication</p>
-            <div id="status" class="status loading">Initializing secure connection...</div>
-            <button id="startButton" class="button" style="display: none;">Start Verification</button>
+            <div class="icon">👤</div>
+            <h2>Face Registration</h2>
+            <p class="subtitle">Required for Attendance</p>
+            
+            <div class="roll-number">
+                Roll Number: \(rollNumber)
+            </div>
+            
+            <p class="info">Face registration is required for attendance marking. Position your face in the camera frame.</p>
+            <div id="status" class="status loading">Initializing Face.io...</div>
+            <button id="startButton" class="button" style="display: none;">Start Registration</button>
         </div>
 
         <script src="https://cdn.faceio.net/fio.js"></script>
@@ -372,9 +300,9 @@ private func getFaceIOHTML() -> String {
                 }
             }
 
-            function closeAuth() {
-                log('Close button clicked');
-                safeCallback('onClose', 'User closed authentication');
+            function closeRegistration() {
+                log('Registration cannot be closed - face registration is required');
+                // Do nothing - face registration is mandatory
             }
 
             function updateStatus(message, type) {
@@ -385,72 +313,72 @@ private func getFaceIOHTML() -> String {
 
             function initializeFaceIO() {
                 try {
-                    log('Initializing Face.io...');
+                    log('Initializing Face.io for registration...');
                     faceio = new faceIO('fioa3e64');
                     
-                    updateStatus('✨ Ready for authentication', 'success');
+                    updateStatus('✨ Ready for face registration', 'success');
                     container.classList.add('pulse');
                     startButton.style.display = 'block';
-                    startButton.onclick = startAuthentication;
+                    startButton.onclick = startRegistration;
                     
                     log('Face.io initialized successfully');
                 } catch (error) {
                     log(`Face.io initialization failed: ${error.message}`);
-                    updateStatus('❌ Failed to initialize authentication', 'error');
+                    updateStatus('❌ Failed to initialize face registration', 'error');
                     safeCallback('onError', `Initialization failed: ${error.message}`);
                 }
             }
 
-            function startAuthentication() {
+            function startRegistration() {
                 if (isProcessing) {
-                    log('Authentication already in progress');
+                    log('Registration already in progress');
                     return;
                 }
                 
                 isProcessing = true;
                 startButton.style.display = 'none';
-                updateStatus('🔍 Preparing camera...', 'loading');
+                updateStatus('🔍 Preparing camera for registration...', 'loading');
                 container.classList.remove('pulse');
-                document.body.classList.add('scanning');
                 
-                log('Starting authentication process');
+                log('Starting face registration process for roll number: \(rollNumber)');
                 
                 setTimeout(() => {
-                    authenticateUser();
+                    enrollNewUser();
                 }, 1000);
             }
 
-            function authenticateUser() {
+            function enrollNewUser() {
                 if (!faceio) {
                     resetToReady('Face.io not properly initialized');
                     return;
                 }
 
-                log('Starting face authentication');
-                updateStatus('📷 Scanning face... Look at camera', 'loading');
+                log('Starting face enrollment for roll number: \(rollNumber)');
+                updateStatus('📷 Scanning face for registration...', 'loading');
 
-                faceio.authenticate({
+                faceio.enroll({
                     locale: "auto",
                     payload: {
-                        /* Optional additional data */
-                    }
-                }).then(userData => {
-                    log(`Authentication successful: ${JSON.stringify(userData)}`);
-                    
-                    const rollNumber = userData.payload?.rollNumber || userData.facialId || 'N/A';
-                    const userName = userData.payload?.userName || 'User';
-                    
+                        rollNumber: "\(rollNumber)",
+                        registeredBy: "student",
+                        registrationDate: new Date().toISOString()
+                    },
+                    userConsent: false,
+                    enrollIntroTimeout: 3,
+                    noBoardingPass: true
+                }).then(userInfo => {
+                    log(`Registration successful! FacialId: ${userInfo.facialId} for roll number: \(rollNumber)`);
                     updateStatus(
-                        `✅ Authentication successful!<br><strong>${userName}</strong><br>ID: ${rollNumber}`, 
+                        `✅ Registration successful!<br><strong>Welcome!</strong><br>Face ID: ${userInfo.facialId}`, 
                         'success'
                     );
                     
                     setTimeout(() => {
-                        safeCallback('onAuthenticated', rollNumber);
+                        safeCallback('onFaceRegistered', userInfo.facialId);
                     }, 1500);
                     
                 }).catch(errCode => {
-                    log(`Authentication failed with code: ${errCode}`);
+                    log(`Registration failed with code: ${errCode} for roll number: \(rollNumber)`);
                     const errorMessage = getErrorMessage(errCode);
                     resetToReady(errorMessage);
                     safeCallback('onError', errorMessage);
@@ -459,15 +387,14 @@ private func getFaceIOHTML() -> String {
 
             function resetToReady(errorMessage = null) {
                 isProcessing = false;
-                document.body.classList.remove('scanning');
                 container.classList.add('pulse');
                 
                 if (errorMessage) {
                     updateStatus(`❌ ${errorMessage}`, 'error');
                     startButton.textContent = 'Try Again';
                 } else {
-                    updateStatus('✨ Ready for authentication', 'success');
-                    startButton.textContent = 'Start Verification';
+                    updateStatus('✨ Ready for face registration', 'success');
+                    startButton.textContent = 'Start Registration';
                 }
                 
                 startButton.style.display = 'block';
@@ -477,16 +404,16 @@ private func getFaceIOHTML() -> String {
                 const errorMap = {
                     1: "Camera access denied. Please allow camera permissions.",
                     2: "No face detected. Please position yourself in front of the camera.",
-                    3: "Face not recognized. Please try again or register first.",
+                    3: "Face recognition failed. Please ensure good lighting.",
                     4: "Multiple faces detected. Please ensure only one person is visible.",
-                    5: "Liveness check failed. Please look directly at the camera.",
-                    6: "Face detection timeout. Please try again.",
+                    5: "Face already registered. This face is already in our system.",
+                    6: "Liveness check failed. Please look directly at the camera.",
                     7: "Network connection error. Please check your internet.",
                     8: "Invalid PIN code entered.",
                     9: "Processing error occurred. Please try again.",
                     10: "Unauthorized access attempt detected.",
                     11: "Terms of service not accepted.",
-                    12: "Authentication interface not ready.",
+                    12: "Registration interface not ready.",
                     13: "Session has expired. Please restart.",
                     14: "Operation timed out. Please try again.",
                     15: "Too many requests. Please wait before trying again.",
@@ -494,20 +421,20 @@ private func getFaceIOHTML() -> String {
                     17: "Invalid application configuration."
                 };
                 
-                return errorMap[errCode] || `Authentication error (Code: ${errCode}). Please try again.`;
+                return errorMap[errCode] || `Registration error (Code: ${errCode}). Please try again.`;
             }
 
             // Initialize when page loads
             window.addEventListener('load', () => {
-                log('Page loaded, initializing Face.io...');
+                log('Face registration page loaded for roll number: \(rollNumber)');
                 setTimeout(initializeFaceIO, 500);
             });
 
             // Handle visibility changes
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden && isProcessing) {
-                    log('Page became hidden during processing');
-                    resetToReady('Authentication interrupted');
+                    log('Page became hidden during registration');
+                    resetToReady('Registration interrupted');
                 }
             });
         </script>

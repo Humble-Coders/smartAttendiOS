@@ -8,6 +8,8 @@ final class UserDefaultsManager {
         static let studentClassName = "student_class_name"
         static let isLoggedIn = "is_logged_in"
         static let lastLoginDate = "last_login_date"
+        static let faceRegistrationId = "face_registration_id"
+        static let faceRegistrationDate = "face_registration_date"
     }
     
     // MARK: - Student Data Methods
@@ -40,6 +42,29 @@ final class UserDefaultsManager {
         return UserDefaults.standard.object(forKey: Keys.lastLoginDate) as? Date
     }
     
+    // MARK: - Face Registration Methods
+    
+    /// Save face registration data
+    static func saveFaceRegistrationData(faceId: String) {
+        UserDefaults.standard.set(faceId, forKey: Keys.faceRegistrationId)
+        UserDefaults.standard.set(Date(), forKey: Keys.faceRegistrationDate)
+    }
+    
+    /// Get face registration ID
+    static func getFaceRegistrationId() -> String? {
+        return UserDefaults.standard.string(forKey: Keys.faceRegistrationId)
+    }
+    
+    /// Get face registration date
+    static func getFaceRegistrationDate() -> Date? {
+        return UserDefaults.standard.object(forKey: Keys.faceRegistrationDate) as? Date
+    }
+    
+    /// Check if face is registered
+    static func isFaceRegistered() -> Bool {
+        return getFaceRegistrationId() != nil
+    }
+    
     // MARK: - Logout Methods
     
     /// Clear all user data
@@ -48,6 +73,8 @@ final class UserDefaultsManager {
         UserDefaults.standard.removeObject(forKey: Keys.studentClassName)
         UserDefaults.standard.removeObject(forKey: Keys.isLoggedIn)
         UserDefaults.standard.removeObject(forKey: Keys.lastLoginDate)
+        UserDefaults.standard.removeObject(forKey: Keys.faceRegistrationId)
+        UserDefaults.standard.removeObject(forKey: Keys.faceRegistrationDate)
     }
     
     // MARK: - Validation Methods

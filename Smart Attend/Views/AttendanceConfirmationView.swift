@@ -178,28 +178,3 @@ struct SignalStrengthMini: View {
         }
     }
 }
-
-//#Preview {
-//    ZStack {
-//        Color(.systemGroupedBackground)
-//            .ignoresSafeArea()
-//        
-//        AttendanceConfirmationView(
-//            device: BLEDevice(
-//                peripheral: CBPeripheral(),
-//                name: "Humble Coders",
-//                rssi: NSNumber(value: -45),
-//                advertisementData: [:],
-//                subjectCode: "UCS301",
-//                rawSubjectData: nil,
-//                discoveredAt: Date()
-//            ),
-//            onConfirm: {
-//                print("Confirmed")
-//            },
-//            onCancel: {
-//                print("Cancelled")
-//            }
-//        )
-//    }
-//}

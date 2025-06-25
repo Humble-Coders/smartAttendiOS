@@ -81,6 +81,13 @@ struct AttendanceSuccessView: View {
                             )
                             
                             DetailRow(
+                                icon: "building.fill",
+                                title: "Room",
+                                value: extractRoomNumber(from: session.device.name),
+                                color: .purple
+                            )
+                            
+                            DetailRow(
                                 icon: "wifi",
                                 title: "Device",
                                 value: session.device.name,
@@ -98,7 +105,7 @@ struct AttendanceSuccessView: View {
                                 icon: "calendar",
                                 title: "Date",
                                 value: formatDate(session.startTime),
-                                color: .purple
+                                color: .indigo
                             )
                         }
                     }
@@ -170,6 +177,26 @@ struct AttendanceSuccessView: View {
         }
     }
     
+    // Extract room number by removing last 3 digits from device name
+    private func extractRoomNumber(from deviceName: String) -> String {
+        let cleanName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Check if the device name has at least 3 characters and the last 3 are digits
+        if cleanName.count >= 3 {
+            let lastThreeIndex = cleanName.index(cleanName.endIndex, offsetBy: -3)
+            let lastThree = String(cleanName[lastThreeIndex...])
+            
+            // If last 3 characters are digits, remove them
+            if lastThree.allSatisfy({ $0.isNumber }) {
+                let roomNumber = String(cleanName[..<lastThreeIndex])
+                return roomNumber.isEmpty ? cleanName : roomNumber
+            }
+        }
+        
+        // If pattern doesn't match, return original name
+        return cleanName
+    }
+    
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -208,28 +235,3 @@ struct DetailRow: View {
         }
     }
 }
-
-//#Preview {
-//    let mockSession = AttendanceSession(
-//        device: BLEDevice(
-//            peripheral: CBPeripheral(),
-//            name: "Humble Coders",
-//            rssi: NSNumber(value: -45),
-//            advertisementData: [:],
-//            subjectCode: "UCS301",
-//            rawSubjectData: nil,
-//            discoveredAt: Date()
-//        ),
-//        subjectCode: "UCS301"
-//    )
-//    
-//    var completedSession = mockSession
-//    completedSession.complete(with: FaceIOResult(rollNumber: "2021-CS-123"))
-//    
-//    return AttendanceSuccessView(
-//        session: completedSession,
-//        onDismiss: {
-//            print("Dismissed")
-//        }
-//    )
-//}

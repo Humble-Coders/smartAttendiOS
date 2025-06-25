@@ -21,8 +21,9 @@ struct StudentHomeView: View {
     @State private var actualAttendanceStatus: AttendanceStatus = .unknown
     @State private var isCheckingAttendance = false
     
-    // ADD these new properties to StudentHomeView
-
+    // New state variables for success tracking
+    @State private var lastSuccessfulSessionId: String?
+    @State private var lastAttendanceMarkTime: Date?
 
     enum AttendanceStatus {
         case unknown
@@ -177,9 +178,7 @@ struct StudentHomeView: View {
                 AttendanceSuccessView(
                     session: session,
                     onDismiss: {
-                        attendanceManager.dismissSuccess()
-                        resetToHomeState()
-                        checkForActiveSession() // Refresh session status
+                        dismissSuccessAndResetToCheckSession()
                     }
                 )
             }
@@ -207,7 +206,6 @@ struct StudentHomeView: View {
                 )
             }
         }
-
     }
     
     // MARK: - Header Section
@@ -316,78 +314,6 @@ struct StudentHomeView: View {
         )
     }
     
-    private func checkActualAttendanceStatus() {
-        guard let session = firebaseManager.activeSession, session.isActive else {
-            actualAttendanceStatus = .unknown
-            return
-        }
-        
-        actualAttendanceStatus = .checking
-        isCheckingAttendance = true
-        
-        let currentDate = Date()
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateString = dateFormatter.string(from: currentDate)
-        
-        // Create monthly collection name
-        let monthFormatter = DateFormatter()
-        monthFormatter.dateFormat = "yyyy_MM"
-        let monthString = monthFormatter.string(from: currentDate)
-        let collectionName = "attendance_\(monthString)"
-        
-        let db = Firestore.firestore()
-        let baseQuery = db.collection(collectionName)
-            .whereField("rollNumber", isEqualTo: student.rollNumber)
-            .whereField("subject", isEqualTo: session.subject)
-            .whereField("date", isEqualTo: dateString)
-            .whereField("present", isEqualTo: true)
-        
-        if session.isExtra ?? false {
-            // For extra classes: Check if ANY extra class already marked for this subject today
-            let extraQuery = baseQuery.whereField("isExtra", isEqualTo: true)
-            
-            extraQuery.getDocuments { snapshot, error in
-                DispatchQueue.main.async {
-                    self.isCheckingAttendance = false
-                    
-                    if let error = error {
-                        print("❌ Error checking attendance status: \(error)")
-                        self.actualAttendanceStatus = .unknown
-                        return
-                    }
-                    
-                    let documents = snapshot?.documents ?? []
-                    self.actualAttendanceStatus = documents.isEmpty ? .notMarked : .marked
-                    
-                    print("📊 Attendance check result: \(documents.isEmpty ? "Not marked" : "Marked") for extra class")
-                }
-            }
-        } else {
-            // For regular classes: Check if same type already marked (exclude extra classes)
-            let regularQuery = baseQuery
-                .whereField("type", isEqualTo: session.type)
-                .whereField("isExtra", isEqualTo: false)
-            
-            regularQuery.getDocuments { snapshot, error in
-                DispatchQueue.main.async {
-                    self.isCheckingAttendance = false
-                    
-                    if let error = error {
-                        print("❌ Error checking attendance status: \(error)")
-                        self.actualAttendanceStatus = .unknown
-                        return
-                    }
-                    
-                    let documents = snapshot?.documents ?? []
-                    self.actualAttendanceStatus = documents.isEmpty ? .notMarked : .marked
-                    
-                    print("📊 Attendance check result: \(documents.isEmpty ? "Not marked" : "Marked") for \(session.type)")
-                }
-            }
-        }
-    }
-    
     var attendanceStatusIndicator: some View {
         Group {
             if actualAttendanceStatus.showIndicator {
@@ -449,66 +375,58 @@ struct StudentHomeView: View {
         }
     }
     
-    // MARK: - Current Activity Section
+    // MARK: - Current Activity Section with Refined UI
     var currentActivitySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Detection Progress")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.primary)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 18))
+                    .foregroundColor(.blue)
+                
+                Text("Detection Progress")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                // Overall progress indicator
+                ProgressCircle(progress: overallProgress)
+            }
             
-            VStack(spacing: 0) {
+            VStack(spacing: 12) {
                 // Step 1: Session Active
-                ProgressStepView(
+                RefinedProgressStepView(
                     stepNumber: 1,
                     title: "Session Active",
+                    subtitle: sessionStepSubtitle,
                     status: sessionStepStatus,
-                    isActive: true,
-                    isLast: false
+                    icon: "checkmark.seal.fill"
                 )
                 
                 // Step 2: Presence Detection
-                ProgressStepView(
+                RefinedProgressStepView(
                     stepNumber: 2,
-                    title: "Presence Detected",
+                    title: "Presence Detection",
+                    subtitle: presenceStepSubtitle,
                     status: presenceDetectionStepStatus,
-                    isActive: sessionStepStatus == .completed,
-                    isLast: false
+                    icon: "wifi.circle.fill"
                 )
                 
                 // Step 3: Face Authentication
-                ProgressStepView(
+                RefinedProgressStepView(
                     stepNumber: 3,
                     title: "Face Authentication",
+                    subtitle: faceAuthStepSubtitle,
                     status: faceAuthStepStatus,
-                    isActive: presenceDetectionStepStatus == .completed,
-                    isLast: true
+                    icon: "faceid"
                 )
             }
-            .padding(12)
+            .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.systemGray6))
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
             )
-        }
-    }
-    
-    var presenceDetectionStepStatus: ProgressStepStatus {
-        if !firebaseManager.isSessionActive {
-            return .pending
-        }
-        
-        // If BLE is not ready
-        if bleManager.status != .poweredOn && bleManager.status != .scanning && bleManager.status != .deviceFound {
-            return .error
-        }
-        
-        // If scanning or detected
-        if bleManager.isScanning {
-            return .inProgress
-        } else if bleManager.targetRoomDetected {
-            return .completed
-        } else {
-            return .pending
         }
     }
     
@@ -527,8 +445,8 @@ struct StudentHomeView: View {
         }
     }
     
-    // ADD these new computed properties for step statuses
-
+    // MARK: - Computed Properties for Steps
+    
     var sessionStepStatus: ProgressStepStatus {
         if firebaseManager.isLoading {
             return .inProgress
@@ -538,41 +456,68 @@ struct StudentHomeView: View {
             return .error
         }
     }
-
-    var bluetoothStepStatus: ProgressStepStatus {
+    
+    var sessionStepSubtitle: String {
+        if firebaseManager.isLoading {
+            return "Checking for active sessions..."
+        } else if firebaseManager.isSessionActive {
+            if actualAttendanceStatus == .marked {
+                return "Session active - Attendance marked"
+            } else {
+                return "Session found for your class"
+            }
+        } else {
+            return "No active session found"
+        }
+    }
+    
+    var presenceDetectionStepStatus: ProgressStepStatus {
         if !firebaseManager.isSessionActive {
             return .pending
         }
         
-        switch bleManager.status {
-        case .poweredOn:
+        // If attendance is already marked for this session, show as completed
+        if actualAttendanceStatus == .marked {
             return .completed
-        case .scanning:
-            return .inProgress
-        case .poweredOff, .unauthorized, .unsupported:
-            return .error
-        default:
-            return .pending
-        }
-    }
-
-    var roomDetectionStepStatus: ProgressStepStatus {
-        if bluetoothStepStatus != .completed {
-            return .pending
         }
         
+        // If BLE is not ready
+        if bleManager.status != .poweredOn && bleManager.status != .scanning && bleManager.status != .deviceFound {
+            return .error
+        }
+        
+        // If scanning or detected
         if bleManager.isScanning {
             return .inProgress
         } else if bleManager.targetRoomDetected {
             return .completed
-        } else if bleManager.status == .poweredOn && !bleManager.isScanning {
-            return .pending
         } else {
-            return .error
+            return .pending
+        }
+    }
+    
+    var presenceStepSubtitle: String {
+        if !firebaseManager.isSessionActive {
+            return "Waiting for active session"
+        } else if actualAttendanceStatus == .marked {
+            return "Presence was detected successfully"
+        } else if bleManager.status != .poweredOn && bleManager.status != .scanning && bleManager.status != .deviceFound {
+            return "Bluetooth issue detected"
+        } else if bleManager.isScanning {
+            return "Scanning for classroom signal..."
+        } else if bleManager.targetRoomDetected {
+            return "Classroom signal detected"
+        } else {
+            return "Ready to detect presence"
         }
     }
     
     var faceAuthStepStatus: ProgressStepStatus {
+        // If attendance is already marked for this session, show as completed
+        if actualAttendanceStatus == .marked {
+            return .completed
+        }
+        
         if presenceDetectionStepStatus != .completed {
             return .pending
         }
@@ -580,11 +525,6 @@ struct StudentHomeView: View {
         // If face authentication is in progress
         if attendanceManager.showingFaceAuthentication {
             return .inProgress
-        }
-        
-        // If attendance was actually marked (from Firestore)
-        if actualAttendanceStatus == .marked {
-            return .completed
         }
         
         // If there was an error
@@ -595,123 +535,41 @@ struct StudentHomeView: View {
         return .pending
     }
 
-    // ADD these supporting types and views
-
-    enum ProgressStepStatus {
-        case pending, inProgress, completed, error
-        
-        var color: Color {
-            switch self {
-            case .pending: return .gray.opacity(0.4)
-            case .inProgress: return .blue
-            case .completed: return .green
-            case .error: return .red
-            }
-        }
-        
-        var icon: String {
-            switch self {
-            case .pending: return "circle"
-            case .inProgress: return "clock"
-            case .completed: return "checkmark.circle.fill"
-            case .error: return "xmark.circle.fill"
-            }
-        }
-    }
-
-    struct ProgressStepView: View {
-        let stepNumber: Int
-        let title: String
-        let status: ProgressStepStatus
-        let isActive: Bool
-        let isLast: Bool
-        
-        var body: some View {
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    // Step indicator
-                    ZStack {
-                        Circle()
-                            .fill(status.color)
-                            .frame(width: 20, height: 20)
-                        
-                        if status == .inProgress {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.6)
-                        } else {
-                            Image(systemName: status.icon)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                    }
-                    
-                    // Step info
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(isActive ? .primary : .secondary)
-                        
-                        Text(statusText)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.vertical, 6)
-                
-                // Connecting line (except for last item)
-                if !isLast {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 1, height: 12)
-                        .offset(x: -35) // Align with circle center
-                }
-            }
-        }
-        
-        var statusText: String {
-            switch (stepNumber, status) {
-            case (1, .completed): return "Active session found"
-            case (1, .inProgress): return "Checking for session..."
-            case (1, .error): return "No active session"
-            case (1, .pending): return "Waiting..."
-            
-            case (2, .completed): return "In classroom"
-            case (2, .inProgress): return "Detecting room signal..."
-            case (2, .error): return "Room signal issue"
-            case (2, .pending): return "Waiting for session"
-            
-            case (3, .completed): return "Authentication successful"
-            case (3, .inProgress): return "Authenticating face..."
-            case (3, .error): return "Authentication failed"
-            case (3, .pending): return "Waiting for presence"
-            
-            default: return ""
-            }
+    
+    var faceAuthStepSubtitle: String {
+        if actualAttendanceStatus == .marked {
+            return "Face authentication completed"
+        } else if presenceDetectionStepStatus != .completed {
+            return "Waiting for presence detection"
+        } else if attendanceManager.showingFaceAuthentication {
+            return "Authenticating your face..."
+        } else if attendanceManager.showingError {
+            return "Authentication failed"
+        } else {
+            return "Ready for authentication"
         }
     }
     
-    private func preserveAttendanceStatusDuringRefresh() {
-        // Store current completion status before refresh
-        let wasCompleted = isCurrentSessionCompleted
-        let currentSessionId = firebaseManager.activeSession?.sessionId
-        let currentActualStatus = actualAttendanceStatus
-        
-        // After refresh, restore completion status if same session
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            if let refreshedSessionId = self.firebaseManager.activeSession?.sessionId,
-               refreshedSessionId == currentSessionId && wasCompleted {
-                // Restore the completion status for the same session
-                self.completedSessionId = refreshedSessionId
-                // Keep the actual attendance status
-                self.actualAttendanceStatus = currentActualStatus
-            } else {
-                // Different session - check actual attendance status
-                self.checkActualAttendanceStatus()
-            }
+    // Add overall progress computation:
+    var overallProgress: Double {
+        // If attendance is already marked, show 100% completion
+        if actualAttendanceStatus == .marked {
+            return 1.0
         }
+        
+        var progress: Double = 0.0
+        
+        if sessionStepStatus == .completed {
+            progress += 0.33
+        }
+        if presenceDetectionStepStatus == .completed {
+            progress += 0.33
+        }
+        if faceAuthStepStatus == .completed {
+            progress += 0.34
+        }
+        
+        return progress
     }
     
     func recentAttendanceRow(session: AttendanceSession) -> some View {
@@ -858,79 +716,6 @@ struct StudentHomeView: View {
         }
     }
     
-    // MARK: - Attendance Error Overlay
-    var attendanceErrorOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 20) {
-                // Error Icon
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color.orange.opacity(0.15),
-                                    Color.red.opacity(0.1)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 70, height: 70)
-                    
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 32, weight: .medium))
-                        .foregroundStyle(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.orange, Color.red]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                
-                VStack(spacing: 12) {
-                    Text("Attendance Not Marked")
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
-                        .foregroundColor(.primary)
-                    
-                    Text(attendanceErrorMessage)
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                        .lineLimit(nil)
-                }
-                
-                // Simple dismiss button
-                Button(action: dismissAttendanceError) {
-                    Text("OK")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: 100)
-                        .padding(.vertical, 12)
-                        .background(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.orange, Color.red]),
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .cornerRadius(10)
-                }
-            }
-            .padding(24)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.systemBackground))
-                    .shadow(color: Color.black.opacity(0.1), radius: 15, x: 0, y: 8)
-            )
-            .padding(.horizontal, 40)
-        }
-        .animation(.easeInOut(duration: 0.3), value: showingAttendanceError)
-    }
     // MARK: - Bluetooth Prompt Overlay
     var bluetoothPromptOverlay: some View {
         ZStack {
@@ -965,12 +750,31 @@ struct StudentHomeView: View {
         return activeSession.sessionId == completedId
     }
     
+    /// Check if recently successful (within last 5 minutes)
+    private var wasRecentlySuccessful: Bool {
+        guard let activeSession = firebaseManager.activeSession,
+              let lastSuccessfulId = lastSuccessfulSessionId,
+              let lastMarkTime = lastAttendanceMarkTime else {
+            return false
+        }
+        
+        // Consider as recently successful if:
+        // 1. It's the same session that was successful
+        // 2. The success was within the last 5 minutes
+        let fiveMinutesAgo = Date().addingTimeInterval(-300)
+        return activeSession.sessionId == lastSuccessfulId && lastMarkTime > fiveMinutesAgo
+    }
+    
     /// Dynamic button properties for intelligent detection
     private var detectionButtonIcon: String {
         if firebaseManager.isLoading {
             return "clock"
         } else if !firebaseManager.isSessionActive {
             return "arrow.clockwise"
+        } else if actualAttendanceStatus == .marked {
+            return "arrow.clockwise" // Show refresh icon when attendance is marked
+        } else if wasRecentlySuccessful {
+            return "arrow.clockwise" // Show refresh for recently successful
         } else if isCurrentSessionCompleted {
             return "repeat"
         } else {
@@ -983,16 +787,24 @@ struct StudentHomeView: View {
             return "Checking..."
         } else if !firebaseManager.isSessionActive {
             return "Check for Session"
+        } else if actualAttendanceStatus == .marked {
+            return "Check for New Session" // When attendance is marked, allow checking for new sessions
+        } else if wasRecentlySuccessful {
+            return "Check for New Session"
         } else if isCurrentSessionCompleted {
             return "Mark Again"
         } else {
-            return "Start Room Presence Detection"
+            return "Start Room Detection"
         }
     }
     
     private var detectionButtonColors: [Color] {
         if !firebaseManager.isSessionActive {
             return [Color.orange, Color.red]  // Check for session
+        } else if actualAttendanceStatus == .marked {
+            return [Color.blue, Color.cyan]   // Check for new session (attendance marked)
+        } else if wasRecentlySuccessful {
+            return [Color.blue, Color.cyan]   // Check for new session
         } else if isCurrentSessionCompleted {
             return [Color.green, Color.blue]  // Mark again
         } else {
@@ -1020,59 +832,22 @@ struct StudentHomeView: View {
         }
     }
     
-    var bleStatusIcon: String {
-        switch bleManager.status {
-        case .poweredOn:
-            return bleManager.isScanning ? "wifi.circle" : "wifi"
-        case .scanning:
-            return "wifi.circle"
-        case .deviceFound:
-            return "checkmark.circle.fill"
-        default:
-            return "wifi.slash"
-        }
-    }
-    
-    var bleStatusColor: Color {
-        switch bleManager.status {
-        case .poweredOn:
-            return bleManager.isScanning ? .blue : .green
-        case .scanning:
-            return .blue
-        case .deviceFound:
-            return .green
-        default:
-            return .red
-        }
-    }
-    
-    var bleStatusText: String {
-        if bleManager.isScanning {
-            return "Scanning for room signal..."
-        } else if bleManager.targetRoomDetected {
-            return "Room detected successfully"
-        } else if bleManager.status == .poweredOn {
-            return "Ready to scan"
-        } else {
-            return "Bluetooth issue"
-        }
-    }
-    
-    var roomDetectionText: String {
-        if let session = firebaseManager.activeSession {
-            return bleManager.targetRoomDetected ?
-                "Found room \(session.room)" :
-                "Looking for room \(session.room)..."
-        }
-        return "No target room"
-    }
-    
     // MARK: - Methods
     
     private func setupBLECallbacks() {
         bleManager.onRoomDetected = { device in
             DispatchQueue.main.async {
                 self.handleRoomDetected(device: device)
+            }
+        }
+    }
+    
+    private func updateStatusForMarkedAttendance() {
+        if actualAttendanceStatus == .marked && firebaseManager.isSessionActive {
+            if let session = firebaseManager.activeSession {
+                currentStatus = "✅ Attendance marked for \(session.subject) \(session.type)"
+            } else {
+                currentStatus = "✅ Attendance already marked for this session"
             }
         }
     }
@@ -1085,32 +860,130 @@ struct StudentHomeView: View {
             
             await MainActor.run {
                 if firebaseManager.isSessionActive {
-                    // Check if this is a NEW session (different from completed one)
-                    let isNewSession = !isCurrentSessionCompleted
-                    
-                    if isNewSession {
-                        currentStatus = "Active session found! Starting room detection..."
-                        
-                        // Automatically start BLE detection for NEW sessions
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.startBLEDetectionWithOverlay()
-                        }
-                    } else {
-                        currentStatus = "Active session found! Ready for detection."
-                        // Don't auto-start for completed sessions
-                    }
-                    
-                    // Check actual attendance status from Firestore
+                    // Check actual attendance status first
                     checkActualAttendanceStatus()
                     
+                    // Wait a bit for attendance status to be checked, then decide auto-start
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        self.decideAutoStartBLE()
+                    }
+                    
+                    currentStatus = "Active session found! Ready for detection."
                 } else {
                     currentStatus = "No active session for your class."
                     actualAttendanceStatus = .unknown
                     // Clear completion state when no session
                     completedSessionId = nil
+                    lastSuccessfulSessionId = nil
+                    lastAttendanceMarkTime = nil
                     // Stop any ongoing BLE scanning
                     bleManager.stopScanning()
                     bleManager.resetDetection()
+                }
+            }
+        }
+    }
+    
+    private func decideAutoStartBLE() {
+        // Don't auto-start if attendance is already marked (100% progress)
+        if actualAttendanceStatus == .marked {
+            print("📊 Attendance already marked - skipping auto BLE detection")
+            currentStatus = "Session active - Attendance already marked"
+            return
+        }
+        
+        // Don't auto-start if recently successful or already completed
+        if wasRecentlySuccessful || isCurrentSessionCompleted {
+            print("📊 Recently successful or completed - skipping auto BLE detection")
+            return
+        }
+        
+        // Auto-start only for NEW sessions without attendance
+        print("🚀 New session without attendance - auto-starting BLE detection...")
+        currentStatus = "Active session found! Starting room detection..."
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.startBLEDetectionWithOverlay()
+        }
+    }
+    
+    private func checkActualAttendanceStatus() {
+        guard let session = firebaseManager.activeSession, session.isActive else {
+            actualAttendanceStatus = .unknown
+            return
+        }
+        
+        actualAttendanceStatus = .checking
+        isCheckingAttendance = true
+        
+        let currentDate = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateString = dateFormatter.string(from: currentDate)
+        
+        // Create monthly collection name
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "yyyy_MM"
+        let monthString = monthFormatter.string(from: currentDate)
+        let collectionName = "attendance_\(monthString)"
+        
+        let db = Firestore.firestore()
+        let baseQuery = db.collection(collectionName)
+            .whereField("rollNumber", isEqualTo: student.rollNumber)
+            .whereField("subject", isEqualTo: session.subject)
+            .whereField("date", isEqualTo: dateString)
+            .whereField("present", isEqualTo: true)
+        
+        if session.isExtra ?? false {
+            // For extra classes: Check if ANY extra class already marked for this subject today
+            let extraQuery = baseQuery.whereField("isExtra", isEqualTo: true)
+            
+            extraQuery.getDocuments { snapshot, error in
+                DispatchQueue.main.async {
+                    self.isCheckingAttendance = false
+                    
+                    if let error = error {
+                        print("❌ Error checking attendance status: \(error)")
+                        self.actualAttendanceStatus = .unknown
+                        return
+                    }
+                    
+                    let documents = snapshot?.documents ?? []
+                    self.actualAttendanceStatus = documents.isEmpty ? .notMarked : .marked
+                    
+                    // Update status text when attendance is marked
+                    if self.actualAttendanceStatus == .marked {
+                        self.updateStatusForMarkedAttendance()
+                    }
+                    
+                    print("📊 Attendance check result: \(documents.isEmpty ? "Not marked" : "Marked") for extra class")
+                }
+            }
+        } else {
+            // For regular classes: Check if same type already marked (exclude extra classes)
+            let regularQuery = baseQuery
+                .whereField("type", isEqualTo: session.type)
+                .whereField("isExtra", isEqualTo: false)
+            
+            regularQuery.getDocuments { snapshot, error in
+                DispatchQueue.main.async {
+                    self.isCheckingAttendance = false
+                    
+                    if let error = error {
+                        print("❌ Error checking attendance status: \(error)")
+                        self.actualAttendanceStatus = .unknown
+                        return
+                    }
+                    
+                    let documents = snapshot?.documents ?? []
+                    self.actualAttendanceStatus = documents.isEmpty ? .notMarked : .marked
+                    
+                    // Update status text when attendance is marked
+                    if self.actualAttendanceStatus == .marked {
+                        self.updateStatusForMarkedAttendance()
+                    }
+                    
+                    print("📊 Attendance check result: \(documents.isEmpty ? "Not marked" : "Marked") for \(session.type)")
                 }
             }
         }
@@ -1134,11 +1007,6 @@ struct StudentHomeView: View {
         
         print("🚀 Actually starting BLE detection for room: \(session.room)")
         bleManager.startScanningForRoom(session.room)
-    }
-    
-    private func startBLEDetection() {
-        // This is now for manual override only
-        actuallyStartBLEDetection()
     }
     
     private func handleRoomDetected(device: BLEDevice) {
@@ -1229,8 +1097,12 @@ struct StudentHomeView: View {
                     self.attendanceManager.showingFaceAuthentication = false
                     self.attendanceManager.showingSuccess = true
                     
-                    // Mark this specific session as completed
-                    self.completedSessionId = activeSession.sessionId
+                    // Mark this specific session as successfully completed
+                    self.lastSuccessfulSessionId = activeSession.sessionId
+                    self.lastAttendanceMarkTime = Date()
+                    
+                    // Clear the old completion marker since this is a new success
+                    self.completedSessionId = nil
                     
                     // Refresh actual attendance status from database
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -1246,11 +1118,26 @@ struct StudentHomeView: View {
                     // Show error (this should rarely happen since we pre-checked)
                     let errorMessage = self.formatAttendanceError(error)
                     self.showAttendanceError(message: errorMessage)
-                    
-                    
                 }
             }
         }
+    }
+    
+    private func dismissSuccessAndResetToCheckSession() {
+        attendanceManager.dismissSuccess()
+        resetToHomeState()
+        
+        // Mark as successfully completed but reset to allow new session checking
+        if let activeSession = firebaseManager.activeSession {
+            lastSuccessfulSessionId = activeSession.sessionId
+            lastAttendanceMarkTime = Date()
+        }
+        
+        // Reset completion state to show "Check Session" instead of "Mark Again"
+        completedSessionId = nil
+        
+        // Check for new sessions
+        checkForActiveSession()
     }
     
     private func resetToHomeState() {
@@ -1280,7 +1167,9 @@ struct StudentHomeView: View {
     /// Restart detection for marking again (after successful attendance)
     private func restartDetection() {
         completedSessionId = nil // Clear completion state
-        startBLEDetection()
+        lastSuccessfulSessionId = nil // Clear success state
+        lastAttendanceMarkTime = nil
+        startBLEDetectionWithOverlay()
     }
     
     /// Intelligent detection that handles all scenarios
@@ -1291,24 +1180,19 @@ struct StudentHomeView: View {
         } else if !firebaseManager.isSessionActive {
             // No active session - refresh to check for new sessions
             checkForActiveSession()
+        } else if actualAttendanceStatus == .marked {
+            // Attendance already marked - check for new sessions
+            print("📊 Attendance marked - checking for new sessions...")
+            checkForActiveSession()
+        } else if wasRecentlySuccessful {
+            // Recently successful - check for new sessions
+            checkForActiveSession()
         } else if isCurrentSessionCompleted {
             // Session completed - restart for marking again
             restartDetection()
         } else {
-            // Active session available - refresh session data first
-            preserveAttendanceStatusDuringRefresh()
-            checkForActiveSession()
-            
-            // Check if this is the same session after refresh
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if self.isCurrentSessionCompleted {
-                    // Same session - show confirmation
-                    self.showingMarkAgainConfirmation = true
-                } else {
-                    // Different/new session - proceed normally
-                    self.startBLEDetectionWithOverlay()
-                }
-            }
+            // Active session available - start detection
+            startBLEDetectionWithOverlay()
         }
     }
     
@@ -1439,6 +1323,134 @@ struct StudentHomeView: View {
         } else {
             let days = Int(interval / 86400)
             return "\(days)d ago"
+        }
+    }
+}
+
+// MARK: - Supporting Types and Views
+
+enum ProgressStepStatus {
+    case pending, inProgress, completed, error
+    
+    var color: Color {
+        switch self {
+        case .pending: return .gray.opacity(0.4)
+        case .inProgress: return .blue
+        case .completed: return .green
+        case .error: return .red
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .pending: return "circle"
+        case .inProgress: return "clock"
+        case .completed: return "checkmark.circle.fill"
+        case .error: return "xmark.circle.fill"
+        }
+    }
+}
+
+struct RefinedProgressStepView: View {
+    let stepNumber: Int
+    let title: String
+    let subtitle: String
+    let status: ProgressStepStatus
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Step indicator with icon
+            ZStack {
+                Circle()
+                    .fill(status.color.opacity(0.2))
+                    .frame(width: 44, height: 44)
+                
+                if status == .inProgress {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: status.color))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(status.color)
+                }
+            }
+            
+            // Step info
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    // Status badge
+                    StatusBadge(status: status)
+                }
+                
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct StatusBadge: View {
+    let status: ProgressStepStatus
+    
+    var body: some View {
+        Text(statusText)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(status.color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(status.color.opacity(0.15))
+            )
+    }
+    
+    var statusText: String {
+        switch status {
+        case .pending: return "Pending"
+        case .inProgress: return "In Progress"
+        case .completed: return "Completed"
+        case .error: return "Error"
+        }
+    }
+}
+
+struct ProgressCircle: View {
+    let progress: Double
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color(.systemGray5), lineWidth: 3)
+                .frame(width: 32, height: 32)
+            
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    LinearGradient(
+                        colors: [.blue, .purple],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .frame(width: 32, height: 32)
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.5), value: progress)
+            
+            Text("\(Int(progress * 100))%")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.blue)
         }
     }
 }

@@ -112,3 +112,23 @@ struct AttendanceSession {
         self.isCompleted = true
     }
 }
+
+// MARK: - Face.io Registration Models
+
+struct FaceRegistrationResult {
+    let rollNumber: String
+    let faceId: String
+    let success: Bool
+    let timestamp: Date
+    let message: String?
+    
+    init(rollNumber: String, faceId: String, success: Bool = true, message: String? = nil) {
+        self.rollNumber = rollNumber
+        self.faceId = faceId
+        self.success = success
+        self.timestamp = Date()
+        self.message = message
+    }
+}
+
+// Keep all your existing models below...

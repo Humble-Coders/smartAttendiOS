@@ -20,7 +20,7 @@ struct MainAppView: View {
         .animation(.easeInOut(duration: 0.3), value: authManager.isLoading)
     }
     
-    private func handleLogin(name: String, rollNumber: String, className: String) -> Bool {
-        return authManager.login(name: name, rollNumber: rollNumber, className: className)
+    private func handleLogin(name: String, rollNumber: String, className: String, faceRegistrationResult: FaceRegistrationResult?) -> Bool {
+        return authManager.login(name: name, rollNumber: rollNumber, className: className, faceRegistrationResult: faceRegistrationResult)
     }
 }
