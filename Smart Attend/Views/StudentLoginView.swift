@@ -21,6 +21,10 @@ struct LoginView: View {
     @State private var faceRegistrationResult: FaceRegistrationResult?
     @State private var registrationStep: RegistrationStep = .credentials
     
+    // New state for face already registered checkbox
+    @State private var isFaceAlreadyRegistered = false
+    @State private var showingFaceRegisteredConfirmation = false
+    
     let onLoginSuccess: (String, String, String, FaceRegistrationResult?) -> Bool
     
     enum RegistrationStep {
@@ -85,6 +89,18 @@ struct LoginView: View {
             Button("OK") { }
         } message: {
             Text(alertMessage)
+        }
+        .alert("Face Already Registered?", isPresented: $showingFaceRegisteredConfirmation) {
+            Button("Cancel", role: .cancel) {
+                isFaceAlreadyRegistered = false
+            }
+            Button("Yes, Continue") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isFaceAlreadyRegistered = true
+                }
+            }
+        } message: {
+            Text("Are you sure your face was registered before? This will skip the face registration process.")
         }
         // Face Registration Sheet
         .fullScreenCover(isPresented: $showingFaceRegistration) {
@@ -178,28 +194,63 @@ struct LoginView: View {
                     .disabled(isLoggingIn)
             }
             
-            // Continue to Face Registration Button
-            Button(action: proceedToFaceRegistration) {
-                HStack {
-                    Image(systemName: "person.crop.circle.badge.plus")
-                    Text("Continue to Face Registration")
-                }
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color.blue, Color.purple]),
-                        startPoint: .leading,
-                        endPoint: .trailing
+            // Face Already Registered Checkbox
+            faceAlreadyRegisteredCheckbox
+            
+            // Conditional Buttons based on checkbox state
+            if isFaceAlreadyRegistered {
+                // Direct Complete Registration Button
+                Button(action: completeRegistrationDirectly) {
+                    HStack {
+                        if isLoggingIn {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Complete Registration")
+                        }
+                    }
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.green, Color.blue]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
-                )
-                .cornerRadius(12)
-                .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .cornerRadius(12)
+                    .shadow(color: .green.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                .disabled(!isFormValid || isLoggingIn)
+                .opacity(isFormValid && !isLoggingIn ? 1.0 : 0.6)
+            } else {
+                // Continue to Face Registration Button
+                Button(action: proceedToFaceRegistration) {
+                    HStack {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                        Text("Continue to Face Registration")
+                    }
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue, Color.purple]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(12)
+                    .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                .disabled(!isFormValid || isLoggingIn)
+                .opacity(isFormValid && !isLoggingIn ? 1.0 : 0.6)
             }
-            .disabled(!isFormValid || isLoggingIn)
-            .opacity(isFormValid && !isLoggingIn ? 1.0 : 0.6)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 32)
@@ -209,6 +260,86 @@ struct LoginView: View {
                 .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 10)
         )
         .padding(.horizontal, 20)
+    }
+    
+    // MARK: - Face Already Registered Checkbox
+    var faceAlreadyRegisteredCheckbox: some View {
+        VStack(spacing: 12) {
+            // Divider with "OR" text
+            HStack {
+                Rectangle()
+                    .fill(Color(.systemGray4))
+                    .frame(height: 1)
+                
+//                Text("OR")
+//                    .font(.system(size: 12, weight: .medium))
+//                    .foregroundColor(.secondary)
+//                    .padding(.horizontal, 12)
+//                
+//                Rectangle()
+//                    .fill(Color(.systemGray4))
+//                    .frame(height: 1)
+            }
+            .padding(.vertical, 8)
+            
+            // Checkbox
+            Button(action: {
+                if !isFaceAlreadyRegistered {
+                    // Show confirmation dialog when checking
+                    showingFaceRegisteredConfirmation = true
+                } else {
+                    // Uncheck without confirmation
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isFaceAlreadyRegistered = false
+                    }
+                }
+            }) {
+                HStack(spacing: 12) {
+                    // Custom checkbox
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(isFaceAlreadyRegistered ? Color.green : Color(.systemGray3), lineWidth: 2)
+                            .frame(width: 24, height: 24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(isFaceAlreadyRegistered ? Color.green.opacity(0.1) : Color.clear)
+                            )
+                        
+                        if isFaceAlreadyRegistered {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.green)
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("My face is already registered")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.primary)
+                        
+                        Text("Skip face registration and complete signup")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isFaceAlreadyRegistered ? Color.green.opacity(0.05) : Color(.systemGray6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(
+                                    isFaceAlreadyRegistered ? Color.green.opacity(0.3) : Color(.systemGray4),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
     }
     
     // MARK: - Face Registration Instructions View
@@ -352,9 +483,15 @@ struct LoginView: View {
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(.primary)
                 
-                Text("Face registered successfully!")
-                    .font(.system(size: 16))
-                    .foregroundColor(.green)
+                if faceRegistrationResult != nil {
+                    Text("Face registered successfully!")
+                        .font(.system(size: 16))
+                        .foregroundColor(.green)
+                } else {
+                    Text("Using previously registered face!")
+                        .font(.system(size: 16))
+                        .foregroundColor(.blue)
+                }
             }
             
             // Student Summary
@@ -365,6 +502,8 @@ struct LoginView: View {
                 
                 if let result = faceRegistrationResult {
                     SummaryRow(title: "Face ID", value: String(result.faceId.prefix(8)) + "...", icon: "faceid")
+                } else {
+                    SummaryRow(title: "Face Status", value: "Previously Registered", icon: "faceid")
                 }
             }
             .padding(16)
@@ -424,7 +563,7 @@ struct LoginView: View {
         case (0, .credentials), (0, .faceRegistration), (0, .completed):
             return .green
         case (1, .faceRegistration), (1, .completed):
-            return .green
+            return isFaceAlreadyRegistered ? .blue : .green
         case (2, .completed):
             return .green
         case (1, .credentials), (2, .credentials), (2, .faceRegistration):
@@ -472,11 +611,33 @@ struct LoginView: View {
         // Stay on face registration step to allow retry
     }
     
+    // MARK: - New method for direct completion
+    private func completeRegistrationDirectly() {
+        guard validateForm() else { return }
+        
+        isLoggingIn = true
+        
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRoll = rollNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        
+        // Complete registration without face registration (pass nil)
+        let success = onLoginSuccess(trimmedName, trimmedRoll, trimmedClass, nil)
+        
+        DispatchQueue.main.async {
+            self.isLoggingIn = false
+            
+            if !success {
+                self.showError("Failed to complete registration. Please try again.")
+            }
+        }
+    }
+    
     private func completeRegistration() {
         guard validateForm() else { return }
         
-        // Ensure face registration is completed
-        guard let _ = faceRegistrationResult else {
+        // For completion screen, face registration is optional based on checkbox
+        if !isFaceAlreadyRegistered && faceRegistrationResult == nil {
             showError("Face registration is required to complete signup.")
             return
         }
@@ -487,7 +648,7 @@ struct LoginView: View {
         let trimmedRoll = rollNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         
-        // Attempt login with authentication manager
+        // Pass face registration result (can be nil if checkbox was checked)
         let success = onLoginSuccess(trimmedName, trimmedRoll, trimmedClass, faceRegistrationResult)
         
         DispatchQueue.main.async {
@@ -602,15 +763,5 @@ struct CustomTextFieldStyle: TextFieldStyle {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.blue.opacity(0.3), lineWidth: 1)
             )
-    }
-}
-
-#Preview {
-    LoginView { name, rollNumber, className, faceResult in
-        print("Registered: \(name) - \(rollNumber) - \(className)")
-        if let faceResult = faceResult {
-            print("Face ID: \(faceResult.faceId)")
-        }
-        return true
     }
 }
