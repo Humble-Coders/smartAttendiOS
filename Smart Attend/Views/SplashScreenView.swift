@@ -1,10 +1,16 @@
 import SwiftUI
+import FirebaseFirestore
 
 struct SplashScreenView: View {
     @State private var isAnimating = false
     @State private var opacity = 0.0
     @State private var brandingOpacity = 0.0
     @State private var logoScale = 0.8
+    @State private var loadingProgress = 0.0
+    @State private var statusMessage = "Initializing..."
+    
+    // Face recognition toggle state
+    @State private var faceRecognitionEnabled: Bool = true
     
     var body: some View {
         ZStack {
@@ -65,15 +71,39 @@ struct SplashScreenView: View {
                     }
                     .opacity(opacity)
                     
-                    // Enhanced loading indicator
+                    // Enhanced loading indicator with progress
                     VStack(spacing: 16) {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(1.3)
+                        // Progress bar
+                        VStack(spacing: 8) {
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.white.opacity(0.3))
+                                    .frame(width: 200, height: 8)
+                                
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.white)
+                                    .frame(width: 200 * loadingProgress, height: 8)
+                                    .animation(.easeInOut(duration: 0.3), value: loadingProgress)
+                            }
+                            
+                            Text(statusMessage)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white.opacity(0.8))
+                                .animation(.easeInOut(duration: 0.2), value: statusMessage)
+                        }
                         
-                        Text("Loading your experience...")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
+                        // Face recognition status indicator
+                        HStack(spacing: 8) {
+                            Image(systemName: faceRecognitionEnabled ? "faceid" : "wifi.circle")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.7))
+                            
+                            Text(faceRecognitionEnabled ? "Face Recognition Enabled" : "Direct Marking Enabled")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .opacity(loadingProgress > 0.3 ? 1.0 : 0.0)
+                        .animation(.easeInOut(duration: 0.5), value: loadingProgress)
                     }
                     .opacity(opacity)
                 }
@@ -161,11 +191,11 @@ struct SplashScreenView: View {
             }
         }
         .onAppear {
-            startGracefulAnimations()
+            startEnhancedLoadingSequence()
         }
     }
     
-    private func startGracefulAnimations() {
+    private func startEnhancedLoadingSequence() {
         // Logo scale and glow animation
         withAnimation(.easeOut(duration: 1.2)) {
             logoScale = 1.0
@@ -181,12 +211,103 @@ struct SplashScreenView: View {
             isAnimating = true
         }
         
+        // Start loading sequence
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            startLoadingSteps()
+        }
+        
         // Branding appears last
-        withAnimation(.easeIn(duration: 0.8).delay(1.5)) {
+        withAnimation(.easeIn(duration: 0.8).delay(3.5)) {
             brandingOpacity = 1.0
         }
     }
+    
+    private func startLoadingSteps() {
+        // Step 1: Initialize Firebase
+        updateLoadingStep(progress: 0.2, message: "Connecting...")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            // Step 2: Check face recognition toggle
+            self.checkFaceRecognitionToggle()
+        }
+    }
+    
+    private func checkFaceRecognitionToggle() {
+        updateLoadingStep(progress: 0.4, message: "Checking authentication settings...")
+        
+        let db = Firestore.firestore()
+        
+        Task {
+            do {
+                let document = try await db.collection("adminToggles").document("faceRecognition").getDocument()
+                
+                await MainActor.run {
+                    if document.exists, let data = document.data() {
+                        let toggles = AdminToggles(from: data)
+                        self.faceRecognitionEnabled = toggles.faceRecognitionEnabled
+                        
+                        print("🔧 Face Recognition Toggle Status: \(toggles.faceRecognitionEnabled ? "ENABLED" : "DISABLED")")
+                        
+                        // Step 3: Authentication settings confirmed
+                        self.updateLoadingStep(
+                            progress: 0.6,
+                            message: toggles.faceRecognitionEnabled ? "Face recognition ready" : "Direct marking ready"
+                        )
+                    } else {
+                        self.faceRecognitionEnabled = true // Default to enabled if document doesn't exist
+                        print("🔧 Face Recognition Toggle document not found - defaulting to ENABLED")
+                        
+                        self.updateLoadingStep(progress: 0.6, message: "Face recognition ready (default)")
+                    }
+                    
+                    // Continue loading sequence
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        self.continueLoadingSequence()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.faceRecognitionEnabled = true // Default to enabled on error
+                    print("❌ Error checking face recognition toggle: \(error) - defaulting to ENABLED")
+                    
+                    self.updateLoadingStep(progress: 0.6, message: "Authentication ready (fallback)")
+                    
+                    // Continue loading sequence
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        self.continueLoadingSequence()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func continueLoadingSequence() {
+        // Step 4: Loading user preferences
+        updateLoadingStep(progress: 0.8, message: "Loading user preferences...")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            // Step 5: Finalizing setup
+            self.updateLoadingStep(progress: 1.0, message: "Ready to start!")
+            
+            // Small delay before completion
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // The splash screen will be dismissed by the parent view's logic
+                // This enhanced splash ensures face recognition toggle is checked before app starts
+            }
+        }
+    }
+    
+    private func updateLoadingStep(progress: Double, message: String) {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            loadingProgress = progress
+        }
+        
+        withAnimation(.easeInOut(duration: 0.2)) {
+            statusMessage = message
+        }
+    }
 }
+
 
 #Preview {
     SplashScreenView()

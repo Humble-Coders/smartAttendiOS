@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import FirebaseFirestore
 
 final class StudentAuthManager: ObservableObject {
     
@@ -8,6 +9,10 @@ final class StudentAuthManager: ObservableObject {
     @Published var isLoggedIn: Bool = false
     @Published var isLoading: Bool = true
     @Published var faceRegistrationResult: FaceRegistrationResult?
+    @Published var faceRecognitionEnabled: Bool = true // New property for face recognition toggle
+    
+    // MARK: - Private Properties
+    private let db = Firestore.firestore()
     
     // MARK: - Initialization
     init() {
@@ -57,6 +62,7 @@ final class StudentAuthManager: ObservableObject {
         print("   👤 Name: \(trimmedName)")
         print("   🎓 Roll: \(trimmedRoll)")
         print("   📚 Class: \(trimmedClass)")
+        print("   🔧 Face Recognition: \(faceRecognitionEnabled ? "ENABLED" : "DISABLED")")
         
         return true
     }
@@ -78,69 +84,75 @@ final class StudentAuthManager: ObservableObject {
         print("👋 Student logged out successfully")
     }
     
-    /// Check for existing login on app start
+    /// Check for existing login on app start with face recognition toggle check
     func checkExistingLogin() {
         isLoading = true
         let startTime = Date()
         
-        // Minimum splash duration for branding (2 seconds)
+        // Minimum splash duration for branding and toggle checking (4 seconds)
         let minimumSplashDuration: TimeInterval = 4
         
-        // Perform actual login check
+        // Perform login check and face recognition toggle check concurrently
         DispatchQueue.global(qos: .userInitiated).async {
-            // Check if we have valid stored data
-            guard UserDefaultsManager.isStoredDataValid(),
-                  let name = UserDefaultsManager.getStudentName(),
-                  let className = UserDefaultsManager.getStudentClassName(),
-                  let rollNumber = KeychainHelper.getRollNumber() else {
+            // Create a task group to handle both operations
+            Task {
+                // Check face recognition toggle first
+                await self.checkFaceRecognitionToggleInternal()
                 
-                // Calculate remaining time to show splash
-                let elapsed = Date().timeIntervalSince(startTime)
-                let remainingTime = max(0, minimumSplashDuration - elapsed)
+                // Then check existing login
+                let hasValidLogin = self.hasValidStoredLogin()
                 
-                DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
-                    self.isLoading = false
-                    self.isLoggedIn = false
-                    self.currentStudent = nil
-                    self.faceRegistrationResult = nil
+                if hasValidLogin {
+                    // Restore student session
+                    let (name, rollNumber, className) = self.getStoredLoginData()!
+                    let student = Student(
+                        name: name,
+                        rollNumber: rollNumber,
+                        className: className
+                    )
+                    
+                    // Restore face registration data if available
+                    let faceId = UserDefaultsManager.getFaceRegistrationId()
+                    if let faceId = faceId {
+                        self.faceRegistrationResult = FaceRegistrationResult(
+                            rollNumber: rollNumber,
+                            faceId: faceId
+                        )
+                    }
+                    
+                    // Calculate remaining time to show splash
+                    let elapsed = Date().timeIntervalSince(startTime)
+                    let remainingTime = max(0, minimumSplashDuration - elapsed)
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
+                        self.currentStudent = student
+                        self.isLoggedIn = true
+                        self.isLoading = false
+                    }
+                    
+                    print("✅ Restored student session:")
+                    print("   👤 Name: \(name)")
+                    print("   🎓 Roll: \(rollNumber)")
+                    print("   📚 Class: \(className)")
+                    print("   🔧 Face Recognition: \(self.faceRecognitionEnabled ? "ENABLED" : "DISABLED")")
+                    if let faceId = faceId {
+                        print("   🔐 Face ID: \(String(faceId.prefix(8)))...")
+                    }
+                } else {
+                    // Calculate remaining time to show splash
+                    let elapsed = Date().timeIntervalSince(startTime)
+                    let remainingTime = max(0, minimumSplashDuration - elapsed)
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
+                        self.isLoading = false
+                        self.isLoggedIn = false
+                        self.currentStudent = nil
+                        self.faceRegistrationResult = nil
+                    }
+                    
+                    print("ℹ️ No valid stored login found")
+                    print("🔧 Face Recognition: \(self.faceRecognitionEnabled ? "ENABLED" : "DISABLED")")
                 }
-                
-                print("ℹ️ No valid stored login found")
-                return
-            }
-            
-            // Restore student session
-            let student = Student(
-                name: name,
-                rollNumber: rollNumber,
-                className: className
-            )
-            
-            // Restore face registration data if available
-            let faceId = UserDefaultsManager.getFaceRegistrationId()
-            if let faceId = faceId {
-                self.faceRegistrationResult = FaceRegistrationResult(
-                    rollNumber: rollNumber,
-                    faceId: faceId
-                )
-            }
-            
-            // Calculate remaining time to show splash
-            let elapsed = Date().timeIntervalSince(startTime)
-            let remainingTime = max(0, minimumSplashDuration - elapsed)
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
-                self.currentStudent = student
-                self.isLoggedIn = true
-                self.isLoading = false
-            }
-            
-            print("✅ Restored student session:")
-            print("   👤 Name: \(name)")
-            print("   🎓 Roll: \(rollNumber)")
-            print("   📚 Class: \(className)")
-            if let faceId = faceId {
-                print("   🔐 Face ID: \(String(faceId.prefix(8)))...")
             }
         }
     }
@@ -151,6 +163,49 @@ final class StudentAuthManager: ObservableObject {
     }
     
     // MARK: - Private Methods
+    
+    /// Check face recognition toggle from Firebase
+    private func checkFaceRecognitionToggleInternal() async {
+        do {
+            let document = try await db.collection("adminToggles").document("faceRecognition").getDocument()
+            
+            await MainActor.run {
+                if document.exists, let data = document.data() {
+                    let toggles = AdminToggles(from: data)
+                    self.faceRecognitionEnabled = toggles.faceRecognitionEnabled
+                    
+                    print("🔧 Auth Manager - Face Recognition Toggle: \(toggles.faceRecognitionEnabled ? "ENABLED" : "DISABLED")")
+                } else {
+                    self.faceRecognitionEnabled = true // Default to enabled if document doesn't exist
+                    print("🔧 Auth Manager - Face Recognition Toggle document not found - defaulting to ENABLED")
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.faceRecognitionEnabled = true // Default to enabled on error
+                print("❌ Auth Manager - Error checking face recognition toggle: \(error) - defaulting to ENABLED")
+            }
+        }
+    }
+    
+    /// Check if we have valid stored login data
+    private func hasValidStoredLogin() -> Bool {
+        return UserDefaultsManager.isStoredDataValid() &&
+               UserDefaultsManager.getStudentName() != nil &&
+               UserDefaultsManager.getStudentClassName() != nil &&
+               KeychainHelper.getRollNumber() != nil
+    }
+    
+    /// Get stored login data
+    private func getStoredLoginData() -> (String, String, String)? {
+        guard let name = UserDefaultsManager.getStudentName(),
+              let className = UserDefaultsManager.getStudentClassName(),
+              let rollNumber = KeychainHelper.getRollNumber() else {
+            return nil
+        }
+        
+        return (name, rollNumber, className)
+    }
     
     private func validateLoginData(name: String, rollNumber: String, className: String) -> Bool {
         guard name.count >= 2 else {
@@ -177,3 +232,5 @@ final class StudentAuthManager: ObservableObject {
         return true
     }
 }
+
+

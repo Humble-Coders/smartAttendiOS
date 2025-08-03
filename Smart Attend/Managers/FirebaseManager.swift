@@ -3,7 +3,16 @@ import FirebaseFirestore
 import FirebaseCore
 import Combine
 
-// MARK: - Session Data Models
+// MARK: - Admin Toggles Model
+struct AdminToggles {
+    let faceRecognitionEnabled: Bool
+    
+    init(from data: [String: Any]) {
+        self.faceRecognitionEnabled = data["isActivated"] as? Bool ?? true // Default to true for safety
+    }
+}
+
+// MARK: - Session Data Models (keep existing)
 struct ActiveSession {
     let isActive: Bool
     let subject: String
@@ -58,7 +67,7 @@ struct AttendanceRecord {
     }
 }
 
-// MARK: - Firebase Manager
+// MARK: - Enhanced Firebase Manager
 class FirebaseManager: ObservableObject {
     
     // MARK: - Published Properties
@@ -66,9 +75,36 @@ class FirebaseManager: ObservableObject {
     @Published var isSessionActive: Bool = false
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var faceRecognitionEnabled: Bool = true // New property for face recognition toggle
     
     // MARK: - Private Properties
     private let db = Firestore.firestore()
+    
+    // MARK: - Admin Toggles Checking
+    
+    /// Check face recognition toggle from Firebase
+    func checkFaceRecognitionToggle() async {
+        do {
+            let document = try await db.collection("adminToggles").document("faceRecognition").getDocument()
+            
+            await MainActor.run {
+                if document.exists, let data = document.data() {
+                    let toggles = AdminToggles(from: data)
+                    self.faceRecognitionEnabled = toggles.faceRecognitionEnabled
+                    
+                    print("🔧 Face Recognition Toggle Status: \(toggles.faceRecognitionEnabled ? "ENABLED" : "DISABLED")")
+                } else {
+                    self.faceRecognitionEnabled = true // Default to enabled if document doesn't exist
+                    print("🔧 Face Recognition Toggle document not found - defaulting to ENABLED")
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.faceRecognitionEnabled = true // Default to enabled on error
+                print("❌ Error checking face recognition toggle: \(error) - defaulting to ENABLED")
+            }
+        }
+    }
     
     // MARK: - Session Checking
     
@@ -175,6 +211,7 @@ class FirebaseManager: ObservableObject {
                         print("   📅 Date: \(dateString)")
                         print("   ⭐ Extra: \(session.isExtra ?? false)")
                         print("   🕐 Time: \(currentDate)")
+                        print("   🔧 Face Recognition: \(self?.faceRecognitionEnabled == true ? "ENABLED" : "DISABLED")")
                     }
                 }
         }
@@ -261,7 +298,7 @@ class FirebaseManager: ObservableObject {
     }
 }
 
-// MARK: - Custom Errors
+// MARK: - Custom Errors (keep existing)
 enum AttendanceError: LocalizedError {
     case alreadyMarked
     case noActiveSession
@@ -279,7 +316,7 @@ enum AttendanceError: LocalizedError {
     }
 }
 
-// MARK: - Firebase Configuration Helper
+// MARK: - Firebase Configuration Helper (keep existing)
 class FirebaseConfig {
     static func configure() {
         // Configure Firebase here if not already done in AppDelegate

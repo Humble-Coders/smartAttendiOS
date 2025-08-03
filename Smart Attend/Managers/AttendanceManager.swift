@@ -13,11 +13,20 @@ class AttendanceManager: ObservableObject {
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
     
-    // MARK: - Error State Properties (ADD TO EXISTING CLASS)
+    // MARK: - Error State Properties
     @Published var showingError = false
     @Published var currentError: FaceIOError?
     
+    // MARK: - Face Recognition Toggle Properties
+    private var isFaceRecognitionEnabled: Bool = true
+    
     // MARK: - Public Methods
+    
+    /// Update face recognition toggle state
+    func updateFaceRecognitionState(enabled: Bool) {
+        isFaceRecognitionEnabled = enabled
+        print("🔧 AttendanceManager: Face recognition state updated to \(enabled ? "ENABLED" : "DISABLED")")
+    }
     
     /// Start attendance process for detected device
     func startAttendanceProcess(for device: BLEDevice) {
@@ -27,6 +36,7 @@ class AttendanceManager: ObservableObject {
         }
         
         print("🎯 Starting attendance process for subject: \(subjectCode)")
+        print("🔧 Face recognition enabled: \(isFaceRecognitionEnabled)")
         
         // Create new session
         currentSession = AttendanceSession(device: device, subjectCode: subjectCode)
@@ -41,13 +51,57 @@ class AttendanceManager: ObservableObject {
         
         print("✅ User confirmed attendance marking")
         
-        // Hide confirmation and show face authentication
+        // Hide confirmation
         showingConfirmation = false
         
-        // Small delay for smooth transition
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.showingFaceAuthentication = true
+        // Check if face recognition is enabled
+        if isFaceRecognitionEnabled {
+            // Traditional flow: Show face authentication
+            print("🔧 Face recognition ENABLED - proceeding to face authentication")
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.showingFaceAuthentication = true
+            }
+        } else {
+            // Skip face recognition: Auto-complete with student roll number
+            print("🔧 Face recognition DISABLED - skipping to direct attendance marking")
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.handleDirectAttendanceMarking()
+            }
         }
+    }
+    
+    /// Handle direct attendance marking when face recognition is disabled
+    private func handleDirectAttendanceMarking() {
+        guard var session = currentSession else {
+            print("❌ No current session for direct attendance marking")
+            return
+        }
+        
+        print("✅ Processing direct attendance marking (face recognition disabled)")
+        
+        // Create a result without actual face authentication
+        // Use a placeholder roll number that will be validated against the logged-in student
+        let result = FaceIOResult(
+            rollNumber: "DIRECT_MARKING", // This will be replaced with actual student roll number
+            success: true,
+            message: "Attendance marked without face authentication"
+        )
+        
+        session.complete(with: result)
+        currentSession = session
+        
+        // Add to completed sessions
+        completedSessions.insert(session, at: 0)
+        
+        // Show success directly
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.showingSuccess = true
+        }
+        
+        // Log attendance marked
+        logAttendanceMarked(session: session)
     }
     
     /// User cancelled attendance marking
@@ -58,7 +112,7 @@ class AttendanceManager: ObservableObject {
         currentSession = nil
     }
     
-    /// Handle successful face authentication
+    /// Handle successful face authentication (only called when face recognition is enabled)
     func handleFaceAuthenticationSuccess(rollNumber: String) {
         guard var session = currentSession else {
             print("❌ No current session for face authentication success")
@@ -123,9 +177,18 @@ class AttendanceManager: ObservableObject {
         showingError = false
         currentError = nil
         
-        // Small delay for smooth transition, then show face authentication again
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.showingFaceAuthentication = true
+        // Check if face recognition is still enabled before retrying
+        if isFaceRecognitionEnabled {
+            // Small delay for smooth transition, then show face authentication again
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.showingFaceAuthentication = true
+            }
+        } else {
+            // Face recognition was disabled during error state - proceed with direct marking
+            print("🔧 Face recognition disabled during retry - proceeding with direct marking")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.handleDirectAttendanceMarking()
+            }
         }
     }
     
@@ -138,8 +201,8 @@ class AttendanceManager: ObservableObject {
         currentSession = nil
     }
     
-    // MARK: - Private Helper Method (ADD TO EXISTING CLASS)
-
+    // MARK: - Private Helper Method
+    
     /// Parse string errors to FaceIOError
     private func parseFaceIOError(from errorString: String) -> FaceIOError {
         let lowercaseError = errorString.lowercased()
@@ -206,12 +269,15 @@ class AttendanceManager: ObservableObject {
     private func logAttendanceMarked(session: AttendanceSession) {
         guard let result = session.faceIOResult else { return }
         
+        let rollNumber = result.rollNumber == "DIRECT_MARKING" ? "(Direct Marking)" : result.rollNumber
+        
         print("📝 ATTENDANCE MARKED:")
-        print("   👤 Roll Number: \(result.rollNumber)")
+        print("   👤 Roll Number: \(rollNumber)")
         print("   📚 Subject: \(session.subjectCode)")
         print("   📱 Device: \(session.device.name)")
         print("   🕐 Time: \(formatDateTime(session.startTime))")
         print("   📶 Signal: \(session.device.rssi) dBm")
+        print("   🔧 Method: \(isFaceRecognitionEnabled ? "Face Authentication" : "Direct Marking")")
     }
     
     private func formatDateTime(_ date: Date) -> String {

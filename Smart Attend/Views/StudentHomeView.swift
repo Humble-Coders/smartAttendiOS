@@ -15,7 +15,7 @@ struct StudentHomeView: View {
     @State private var showingRoomDetectionStart = false
     @State private var showingAttendanceError = false
     @State private var attendanceErrorMessage = ""
-    @State private var completedSessionId: String? // Track which session was completed
+    @State private var completedSessionId: String?
     @State private var showingMarkAgainConfirmation = false
     
     @State private var actualAttendanceStatus: AttendanceStatus = .unknown
@@ -89,8 +89,7 @@ struct StudentHomeView: View {
                     .padding(.top, 20)
                 }
             }
-            .navigationTitle("Attendance")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("AttendX")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -144,7 +143,7 @@ struct StudentHomeView: View {
                 }
             }
         )
-        // Face Authentication Sheet
+        // Face Authentication Sheet - Only show if face recognition is enabled
         .fullScreenCover(isPresented: $attendanceManager.showingFaceAuthentication) {
             NavigationView {
                 FaceIOWebView(
@@ -208,6 +207,7 @@ struct StudentHomeView: View {
         }
     }
     
+    // MARK: - Header Section
     // MARK: - Header Section
     var headerSection: some View {
         VStack(spacing: 12) {
@@ -278,7 +278,7 @@ struct StudentHomeView: View {
                         
                         Spacer()
                         
-                        // Attendance Status Indicator - moved to top right
+                        // Attendance Status Indicator
                         if let session = firebaseManager.activeSession, session.isActive {
                             attendanceStatusIndicator
                         }
@@ -303,6 +303,13 @@ struct StudentHomeView: View {
                     SessionDetailRow(title: "Subject", value: session.subject, icon: "book.fill")
                     SessionDetailRow(title: "Room", value: session.room, icon: "building.fill")
                     SessionDetailRow(title: "Type", value: session.type.capitalized, icon: "doc.fill")
+                    
+                    // Show face recognition status
+                    SessionDetailRow(
+                        title: "Auth Method",
+                        value: firebaseManager.faceRecognitionEnabled ? "Face Recognition" : "Room Presence",
+                        icon: firebaseManager.faceRecognitionEnabled ? "faceid" : "wifi.circle"
+                    )
                 }
             }
         }
@@ -375,7 +382,7 @@ struct StudentHomeView: View {
         }
     }
     
-    // MARK: - Current Activity Section with Refined UI
+    // MARK: - Current Activity Section with Face Recognition Status
     var currentActivitySection: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -412,13 +419,13 @@ struct StudentHomeView: View {
                     icon: "wifi.circle.fill"
                 )
                 
-                // Step 3: Face Authentication
+                // Step 3: Authentication (conditional based on face recognition toggle)
                 RefinedProgressStepView(
                     stepNumber: 3,
-                    title: "Face Authentication",
-                    subtitle: faceAuthStepSubtitle,
-                    status: faceAuthStepStatus,
-                    icon: "faceid"
+                    title: firebaseManager.faceRecognitionEnabled ? "Face Authentication" : "Attendance Confirmation",
+                    subtitle: authStepSubtitle,
+                    status: authStepStatus,
+                    icon: firebaseManager.faceRecognitionEnabled ? "faceid" : "checkmark.circle.fill"
                 )
             }
             .padding(16)
@@ -512,7 +519,7 @@ struct StudentHomeView: View {
         }
     }
     
-    var faceAuthStepStatus: ProgressStepStatus {
+    var authStepStatus: ProgressStepStatus {
         // If attendance is already marked for this session, show as completed
         if actualAttendanceStatus == .marked {
             return .completed
@@ -522,31 +529,44 @@ struct StudentHomeView: View {
             return .pending
         }
         
-        // If face authentication is in progress
-        if attendanceManager.showingFaceAuthentication {
-            return .inProgress
-        }
-        
-        // If there was an error
-        if attendanceManager.showingError {
-            return .error
+        if firebaseManager.faceRecognitionEnabled {
+            // Face authentication flow
+            if attendanceManager.showingFaceAuthentication {
+                return .inProgress
+            }
+            
+            if attendanceManager.showingError {
+                return .error
+            }
+        } else {
+            // Direct marking flow - if presence is detected, this step is automatically completed
+            if presenceDetectionStepStatus == .completed && actualAttendanceStatus != .marked {
+                return .inProgress // Processing direct attendance
+            }
         }
         
         return .pending
     }
-
     
-    var faceAuthStepSubtitle: String {
+    var authStepSubtitle: String {
         if actualAttendanceStatus == .marked {
-            return "Face authentication completed"
+            return firebaseManager.faceRecognitionEnabled ? "Face authentication completed" : "Attendance marked successfully"
         } else if presenceDetectionStepStatus != .completed {
             return "Waiting for presence detection"
-        } else if attendanceManager.showingFaceAuthentication {
-            return "Authenticating your face..."
-        } else if attendanceManager.showingError {
-            return "Authentication failed"
+        } else if firebaseManager.faceRecognitionEnabled {
+            if attendanceManager.showingFaceAuthentication {
+                return "Authenticating your face..."
+            } else if attendanceManager.showingError {
+                return "Authentication failed"
+            } else {
+                return "Ready for face authentication"
+            }
         } else {
-            return "Ready for authentication"
+            if presenceDetectionStepStatus == .completed && actualAttendanceStatus != .marked {
+                return "Processing attendance..."
+            } else {
+                return "Ready for direct attendance marking"
+            }
         }
     }
     
@@ -565,7 +585,7 @@ struct StudentHomeView: View {
         if presenceDetectionStepStatus == .completed {
             progress += 0.33
         }
-        if faceAuthStepStatus == .completed {
+        if authStepStatus == .completed {
             progress += 0.34
         }
         
@@ -585,7 +605,8 @@ struct StudentHomeView: View {
                         .foregroundColor(.primary)
                     
                     if let rollNumber = session.faceIOResult?.rollNumber {
-                        Text("• \(rollNumber)")
+                        let displayRollNumber = rollNumber == "DIRECT_MARKING" ? "Direct" : rollNumber
+                        Text("• \(displayRollNumber)")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.blue)
                     }
@@ -634,6 +655,11 @@ struct StudentHomeView: View {
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
                     }
+                    
+                    // Show authentication method
+                    Text(firebaseManager.faceRecognitionEnabled ? "Face authentication will follow" : "Direct attendance marking enabled")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.8))
                 }
                 .opacity(showingRoomDetectionStart ? 1.0 : 0.0)
             }
@@ -685,7 +711,8 @@ struct StudentHomeView: View {
                             .foregroundColor(.white.opacity(0.9))
                     }
                     
-                    Text("Starting face authentication...")
+                    // Dynamic next step message
+                    Text(firebaseManager.faceRecognitionEnabled ? "Starting face authentication..." : "Marking attendance...")
                         .font(.system(size: 16))
                         .foregroundColor(.white.opacity(0.8))
                 }
@@ -701,16 +728,16 @@ struct StudentHomeView: View {
                 showingClassroomDetected = true
             }
             
-            // Auto-start face authentication after 2 seconds with graceful exit
+            // Auto-proceed after 2 seconds with graceful exit
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 // Graceful exit animation
                 withAnimation(.easeInOut(duration: 0.3)) {
                     showingClassroomDetected = false
                 }
                 
-                // Start face authentication after exit completes
+                // Proceed with next step after exit completes
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    startFaceAuthentication()
+                    proceedWithNextStep()
                 }
             }
         }
@@ -772,9 +799,9 @@ struct StudentHomeView: View {
         } else if !firebaseManager.isSessionActive {
             return "arrow.clockwise"
         } else if actualAttendanceStatus == .marked {
-            return "arrow.clockwise" // Show refresh icon when attendance is marked
+            return "arrow.clockwise"
         } else if wasRecentlySuccessful {
-            return "arrow.clockwise" // Show refresh for recently successful
+            return "arrow.clockwise"
         } else if isCurrentSessionCompleted {
             return "repeat"
         } else {
@@ -788,7 +815,7 @@ struct StudentHomeView: View {
         } else if !firebaseManager.isSessionActive {
             return "Check for Session"
         } else if actualAttendanceStatus == .marked {
-            return "Check for New Session" // When attendance is marked, allow checking for new sessions
+            return "Check for New Session"
         } else if wasRecentlySuccessful {
             return "Check for New Session"
         } else if isCurrentSessionCompleted {
@@ -800,15 +827,15 @@ struct StudentHomeView: View {
     
     private var detectionButtonColors: [Color] {
         if !firebaseManager.isSessionActive {
-            return [Color.orange, Color.red]  // Check for session
+            return [Color.orange, Color.red]
         } else if actualAttendanceStatus == .marked {
-            return [Color.blue, Color.cyan]   // Check for new session (attendance marked)
+            return [Color.blue, Color.cyan]
         } else if wasRecentlySuccessful {
-            return [Color.blue, Color.cyan]   // Check for new session
+            return [Color.blue, Color.cyan]
         } else if isCurrentSessionCompleted {
-            return [Color.green, Color.blue]  // Mark again
+            return [Color.green, Color.blue]
         } else {
-            return [Color.blue, Color.purple] // Start detection
+            return [Color.blue, Color.purple]
         }
     }
     
@@ -856,6 +883,15 @@ struct StudentHomeView: View {
         currentStatus = "Checking for active sessions..."
         
         Task {
+            // First check face recognition toggle
+            await firebaseManager.checkFaceRecognitionToggle()
+            
+            // Update attendance manager with the toggle state
+            await MainActor.run {
+                attendanceManager.updateFaceRecognitionState(enabled: firebaseManager.faceRecognitionEnabled)
+            }
+            
+            // Then check active session
             await firebaseManager.checkActiveSession(for: student.className)
             
             await MainActor.run {
@@ -868,7 +904,8 @@ struct StudentHomeView: View {
                         self.decideAutoStartBLE()
                     }
                     
-                    currentStatus = "Active session found! Ready for detection."
+                    let authMethod = firebaseManager.faceRecognitionEnabled ? "face authentication" : "direct marking"
+                    currentStatus = "Active session found"
                 } else {
                     currentStatus = "No active session for your class."
                     actualAttendanceStatus = .unknown
@@ -900,7 +937,8 @@ struct StudentHomeView: View {
         
         // Auto-start only for NEW sessions without attendance
         print("🚀 New session without attendance - auto-starting BLE detection...")
-        currentStatus = "Active session found! Starting room detection..."
+        let authMethod = firebaseManager.faceRecognitionEnabled ? "face authentication" : "direct marking"
+        currentStatus = "Active session found. Starting room detection "
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.startBLEDetectionWithOverlay()
@@ -1016,9 +1054,20 @@ struct StudentHomeView: View {
         showingClassroomDetected = true
     }
     
-    private func startFaceAuthentication() {
+    private func proceedWithNextStep() {
         showingClassroomDetected = false
         
+        // Check if face recognition is enabled to decide next step
+        if firebaseManager.faceRecognitionEnabled {
+            // Traditional flow: Start face authentication
+            startFaceAuthentication()
+        } else {
+            // Skip face recognition: Start direct attendance marking
+            startDirectAttendanceMarking()
+        }
+    }
+    
+    private func startFaceAuthentication() {
         // Check attendance rules BEFORE starting face authentication
         guard let device = bleManager.detectedDevice,
               let session = firebaseManager.activeSession else {
@@ -1042,6 +1091,88 @@ struct StudentHomeView: View {
                 } else {
                     // Attendance not allowed - show error
                     self.showAttendanceError(message: errorMessage ?? "Attendance cannot be marked")
+                }
+            }
+        }
+    }
+    
+    private func startDirectAttendanceMarking() {
+        print("🎯 Starting direct attendance marking (face recognition disabled)")
+        
+        // Check attendance rules BEFORE marking
+        guard let device = bleManager.detectedDevice,
+              let session = firebaseManager.activeSession else {
+            showAttendanceError(message: "Session data not available")
+            return
+        }
+        
+        // Check if attendance can be marked
+        checkAttendanceEligibility(session: session, device: device) { canMark, errorMessage in
+            DispatchQueue.main.async {
+                if canMark {
+                    // Attendance allowed - proceed with direct marking
+                    self.processDirectAttendanceMarking(session: session, device: device)
+                } else {
+                    // Attendance not allowed - show error
+                    self.showAttendanceError(message: errorMessage ?? "Attendance cannot be marked")
+                }
+            }
+        }
+    }
+    
+    private func processDirectAttendanceMarking(session: ActiveSession, device: BLEDevice) {
+        print("✅ Processing direct attendance marking for student: \(student.rollNumber)")
+        
+        // Mark attendance directly in Firebase
+        firebaseManager.markAttendance(
+            student: student,
+            session: session,
+            detectedDevice: device
+        ) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    print("✅ Direct attendance marked successfully")
+                    
+                    // Create a completed session for display
+                    var completedSession = AttendanceSession(
+                        device: device,
+                        subjectCode: session.subject
+                    )
+                    
+                    let result = FaceIOResult(
+                        rollNumber: self.student.rollNumber,
+                        success: true,
+                        message: "Attendance marked via room presence"
+                    )
+                    
+                    completedSession.complete(with: result)
+                    
+                    // Add to completed sessions
+                    self.attendanceManager.completedSessions.insert(completedSession, at: 0)
+                    self.attendanceManager.currentSession = completedSession
+                    
+                    // Show success screen
+                    self.attendanceManager.showingSuccess = true
+                    
+                    // Mark this specific session as successfully completed
+                    self.lastSuccessfulSessionId = session.sessionId
+                    self.lastAttendanceMarkTime = Date()
+                    
+                    // Clear the old completion marker since this is a new success
+                    self.completedSessionId = nil
+                    
+                    // Refresh actual attendance status from database
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        self.checkActualAttendanceStatus()
+                    }
+                    
+                case .failure(let error):
+                    print("❌ Direct attendance marking failed: \(error)")
+                    
+                    // Show error
+                    let errorMessage = self.formatAttendanceError(error)
+                    self.showAttendanceError(message: errorMessage)
                 }
             }
         }
@@ -1479,17 +1610,4 @@ struct SessionDetailRow: View {
                 .foregroundColor(.primary)
         }
     }
-}
-
-#Preview {
-    StudentHomeView(
-        student: Student(
-            name: "John Doe",
-            rollNumber: "2021001",
-            className: "2S12"
-        ),
-        onLogout: {
-            print("Logout tapped")
-        }
-    )
 }
